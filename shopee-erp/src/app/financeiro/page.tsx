@@ -277,6 +277,16 @@ export default function FinanceiroPage() {
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>💰 Financeiro — Pedidos Shopee</h2>
         <div style={{ flex: 1 }} />
         <button onClick={() => setShowCfg(!showCfg)} style={S.btnSm as any}>⚙️ Configurar</button>
+        <button onClick={() => {
+          const cols = ['data','loja','numero_pedido','sku_vendido','nome_produto','quantidade','preco_unitario','receita_bruta','taxa_shopee','taxa_fixa','custo_produto','custo_embalagem','imposto','lucro_operacional']
+          const header = cols.join(';')
+          const rows = filtered.map((p: any) => cols.map((c: string) => `"${(p as any)[c] ?? ''}"`).join(';'))
+          const csv = [header, ...rows].join('\n')
+          const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a'); a.href = url; a.download = 'financeiro.csv'; a.click()
+          URL.revokeObjectURL(url)
+        }} style={S.btnSm as any}>⬇ CSV</button>
         <button onClick={() => setShowForm(!showForm)} style={S.btnSm as any}>+ Pedido Manual</button>
         <button onClick={() => fileRef.current?.click()} style={S.btn as any} disabled={saving}>
           {saving ? '⏳ Importando...' : '📊 Importar Excel Shopee'}
