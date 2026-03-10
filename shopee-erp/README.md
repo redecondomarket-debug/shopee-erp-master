@@ -94,3 +94,4 @@ Colunas reconhecidas automaticamente:
 - Quantity, Original Price, Discount, Shipping Fee
 - Shopee Commission, Shopee Fee, Final Amount Received
 - Order Status, Store Name
+# Shopee ERP
