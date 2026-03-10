@@ -1,262 +1,399 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { exportToExcel, exportToPDF } from '@/lib/exports'
-import { DollarSign, TrendingUp, TrendingDown, Download, FileText, Search, X, Trash2, AlertTriangle, Settings } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
-type FinanceiroItem = {
-  id: string; pedido: string; data: string; produto: string; sku: string
-  quantidade: number; valor_bruto: number; desconto: number; frete: number
-  comissao_shopee: number; taxas_shopee: number; valor_liquido: number; loja: string
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
+const LOJA_COLORS: Record<string, string> = {
+  'KL MARKET': '#ff6600',
+  'UNIVERSO DOS ACHADOS': '#0ea5e9',
+  'MUNDO DOS ACHADOS': '#a855f7',
+}
+const TAXA_SHOPEE = 0.20
+const TAXA_FIXA   = 4.05
+const DEFAULT_IMPOSTO = 0.06
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const R  = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
+const P  = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
+const N  = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
+
+// ─── UI ATOMS ─────────────────────────────────────────────────────────────────
+const S: Record<string, React.CSSProperties> = {
+  card:      { background: '#16161f', border: '1px solid #2a2a3a', borderRadius: 10, padding: 16 },
+  th:        { padding: '8px 12px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#888', letterSpacing: 0.8, textTransform: 'uppercase' as any, borderBottom: '1px solid #2a2a3a', whiteSpace: 'nowrap' as any },
+  td:        { padding: '7px 12px', fontSize: 12.5, borderBottom: '1px solid #1e1e2a', whiteSpace: 'nowrap' as any },
+  inp:       { background: '#0f0f13', border: '1px solid #2a2a3a', borderRadius: 6, padding: '7px 10px', color: '#e8e8f0', fontSize: 13, width: '100%', outline: 'none', boxSizing: 'border-box' as any },
+  btn:       { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  btnSm:     { background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 11 },
+  btnDanger: { background: '#ef444422', color: '#ef4444', border: '1px solid #ef444444', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 11 },
+  label:     { fontSize: 11, color: '#888', marginBottom: 4, display: 'block', fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' as any },
 }
 
-const LOJAS = ['KL Market', 'Universo dos Achados', 'Mundo dos Achados']
-
-function formatCurrency(val: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
+function Badge({ children, color = '#ff6600' }: { children: React.ReactNode; color?: string }) {
+  return <span style={{ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>{children}</span>
 }
-
-function StatCard({ title, value, sub, color, icon: Icon }: { title: string; value: string; sub?: string; color: string; icon: React.ElementType }) {
+function StatusBadge({ v }: { v: number }) {
+  if (v >= 0.20) return <Badge color="#22c55e">▲ {P(v)}</Badge>
+  if (v >= 0.10) return <Badge color="#f59e0b">● {P(v)}</Badge>
+  return <Badge color="#ef4444">▼ {P(v)}</Badge>
+}
+function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]; rows: React.ReactNode[][]; emptyMsg?: string }) {
   return (
-    <div className="stat-card">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>{title}</p>
-          <p className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>{value}</p>
-          {sub && <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{sub}</p>}
-        </div>
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${color}20` }}>
-          <Icon className="w-5 h-5" style={{ color }} />
-        </div>
-      </div>
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{headers.map((h, i) => <th key={i} style={S.th as any}>{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.length === 0
+            ? <tr><td colSpan={headers.length} style={{ ...S.td, color: '#555', textAlign: 'center', padding: 32 } as any}>{emptyMsg}</td></tr>
+            : rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} style={S.td as any}>{c}</td>)}</tr>)
+          }
+        </tbody>
+      </table>
+    </div>
+  )
+}
+function Toast({ msg, type, onClose }: { msg: string; type: string; onClose: () => void }) {
+  useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t) }, [onClose])
+  return (
+    <div style={{ position: 'fixed', bottom: 28, right: 28, background: type === 'ok' ? '#16a34a' : '#dc2626', color: '#fff', padding: '12px 22px', borderRadius: 10, fontWeight: 700, fontSize: 13, zIndex: 9999, boxShadow: '0 8px 32px #0009' }}>
+      {type === 'ok' ? '✅' : '❌'} {msg}
     </div>
   )
 }
 
+// ─── CÁLCULO (idêntico ao App.js calcPed) ────────────────────────────────────
+function calcLinha(recBruta: number, custoProd: number, custoEmb: number, imposto: number) {
+  const taxaShopee = recBruta * TAXA_SHOPEE
+  const taxaFixa   = TAXA_FIXA
+  const imp        = recBruta * imposto
+  const custoTotal = taxaShopee + taxaFixa + custoProd + custoEmb + imp
+  const lucroOp    = recBruta - custoTotal
+  const margem     = recBruta > 0 ? lucroOp / recBruta : 0
+  return { taxaShopee, taxaFixa, imp, custoTotal, lucroOp, margem }
+}
+
+// ─── COLUNAS EXCEL SHOPEE (índices confirmados pelo usuário) ──────────────────
+// Col 1  (0) = ID do pedido
+// Col 2  (1) = Status do pedido
+// Col 11 (10)= Data de criação do pedido
+// Col 13 (12)= Nº de referência do SKU principal
+// Col 14 (13)= Nome do Produto
+// Col 15 (14)= Número de referência SKU  ← SKU de venda
+// Col 17 (16)= Preço original
+// Col 18 (17)= Preço acordado
+// Col 19 (18)= Quantidade
+// Col 38 (37)= Valor Total
+// Col 43 (42)= Taxa de comissão bruta
+// Col 46 (45)= Taxa de serviço líquida
+// Col 47 (46)= Total global  ← valor líquido
+// Col 63 (62)= LOJA  ← adicionada manualmente
+function parseExcelShopee(rows: any[][]): any[] {
+  return rows.map(r => {
+    const numPedido  = String(r[0]  || '')
+    const status     = String(r[1]  || '')
+    const dataRaw    = r[10] || ''
+    const skuPrinc   = String(r[12] || '')
+    const nomeProd   = String(r[13] || '')
+    const sku        = String(r[14] || r[12] || '').trim()
+    const precoOrig  = parseFloat(String(r[16] || '0').replace(',', '.')) || 0
+    const precoAcord = parseFloat(String(r[17] || '0').replace(',', '.')) || 0
+    const quantidade = parseInt(String(r[18] || '1')) || 1
+    const valorTotal = parseFloat(String(r[37] || '0').replace(',', '.')) || 0
+    const taxaComiss = parseFloat(String(r[42] || '0').replace(',', '.')) || 0
+    const taxaServLiq= parseFloat(String(r[45] || '0').replace(',', '.')) || 0
+    const totalGlobal= parseFloat(String(r[46] || '0').replace(',', '.')) || 0
+    const loja       = String(r[62] || '').trim().toUpperCase() || LOJAS[0]
+
+    // Converter data para YYYY-MM-DD
+    let data = ''
+    if (dataRaw) {
+      const s = String(dataRaw)
+      // formato DD/MM/YYYY ou YYYY-MM-DD ou Excel serial
+      if (/\d{4}-\d{2}-\d{2}/.test(s)) {
+        data = s.slice(0, 10)
+      } else if (/\d{2}\/\d{2}\/\d{4}/.test(s)) {
+        const [d, m, y] = s.split('/')
+        data = `${y}-${m}-${d}`
+      } else if (!isNaN(Number(s))) {
+        // Excel serial date
+        const dt = new Date(Math.round((Number(s) - 25569) * 86400 * 1000))
+        data = dt.toISOString().slice(0, 10)
+      }
+    }
+
+    const recBruta = precoAcord > 0 ? precoAcord * quantidade : valorTotal
+
+    return {
+      numero_pedido: numPedido,
+      status,
+      data,
+      loja: LOJAS.find(l => loja.includes(l.split(' ')[0])) || loja || LOJAS[0],
+      sku,
+      sku_principal: skuPrinc,
+      nome_produto: nomeProd,
+      quantidade,
+      preco_unitario: precoAcord || precoOrig,
+      valor_bruto: recBruta,
+      valor_liquido: totalGlobal || (recBruta - taxaComiss - Math.abs(taxaServLiq)),
+      taxa_shopee: taxaComiss,
+      taxa_servico: taxaServLiq,
+      custo_produto: 0,
+      custo_embalagem: 0,
+    }
+  }).filter(r => r.numero_pedido && r.data)
+}
+
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function FinanceiroPage() {
-  const [items, setItems] = useState<FinanceiroItem[]>([])
-  const [filtered, setFiltered] = useState<FinanceiroItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [lojaFilter, setLojaFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [showConfirmLimpar, setShowConfirmLimpar] = useState(false)
-  const [limpando, setLimpando] = useState(false)
-  const [msg, setMsg] = useState('')
-  // Configurações editáveis
-  const [showConfig, setShowConfig] = useState(false)
-  const [pctImposto, setPctImposto] = useState(0)
-  const [custoEmbalagem, setCustoEmbalagem] = useState(0)
+  const [rows,       setRows]       = useState<any[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [saving,     setSaving]     = useState(false)
+  const [toast,      setToast]      = useState<{ msg: string; type: string } | null>(null)
+  const [filterLoja, setFilterLoja] = useState('Todas')
+  const [dateFrom,   setDateFrom]   = useState('')
+  const [dateTo,     setDateTo]     = useState('')
+  const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
+  const [custoEmb,   setCustoEmb]   = useState(0)
+  const [showCfg,    setShowCfg]    = useState(false)
+  const [showForm,   setShowForm]   = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const [form, setForm] = useState({
+    data: '', loja: LOJAS[0], numero_pedido: '', sku: '', nome_produto: '',
+    quantidade: 1, preco_unitario: '', valor_bruto: '', custo_produto: 0, custo_embalagem: 0
+  })
 
   useEffect(() => { loadData() }, [])
-  useEffect(() => {
-    let data = [...items]
-    if (search) data = data.filter(v => v.pedido?.includes(search) || v.sku?.toLowerCase().includes(search.toLowerCase()) || v.produto?.toLowerCase().includes(search.toLowerCase()))
-    if (lojaFilter) data = data.filter(v => v.loja === lojaFilter)
-    if (dateFrom) data = data.filter(v => v.data >= dateFrom)
-    if (dateTo) data = data.filter(v => v.data <= dateTo)
-    setFiltered(data)
-  }, [items, search, lojaFilter, dateFrom, dateTo])
 
   async function loadData() {
     setLoading(true)
-    const { data } = await supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(1000)
-    setItems(data || [])
+    const { data } = await supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000)
+    setRows(data || [])
     setLoading(false)
   }
 
-  async function handleLimparPeriodo() {
-    setLimpando(true)
-    let query = supabase.from('financeiro').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    if (dateFrom) query = (query as any).gte('data', dateFrom)
-    if (dateTo) query = (query as any).lte('data', dateTo)
-    if (lojaFilter) query = (query as any).eq('loja', lojaFilter)
-    await query
-    setShowConfirmLimpar(false)
-    setLimpando(false)
-    setMsg(`✅ ${filtered.length} registros removidos.`)
-    setTimeout(() => setMsg(''), 4000)
+  const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
+
+  // Importar Excel da Shopee
+  async function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const buf  = await file.arrayBuffer()
+    const wb   = XLSX.read(buf, { type: 'array' })
+    const ws   = wb.Sheets[wb.SheetNames[0]]
+    const data = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: false })
+    // Pular cabeçalho (linha 0)
+    const linhas = (data as any[][]).slice(1).filter(r => r[0])
+    const parsed = parseExcelShopee(linhas)
+    if (!parsed.length) { showToast('Nenhum pedido válido encontrado', 'err'); return }
+
+    setSaving(true)
+    // Upsert por numero_pedido + sku para evitar duplicatas
+    const { error } = await supabase.from('financeiro').upsert(
+      parsed.map(p => ({
+        ...p,
+        valor_liquido: p.valor_liquido || (p.valor_bruto * (1 - TAXA_SHOPEE) - TAXA_FIXA),
+      })),
+      { onConflict: 'numero_pedido,sku' }
+    )
+    setSaving(false)
+    if (error) { showToast('Erro ao salvar: ' + error.message, 'err'); return }
+    showToast(`${parsed.length} pedidos importados!`)
+    loadData()
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  // Adicionar manual
+  async function addManual() {
+    if (!form.data || !form.numero_pedido || !form.sku || !form.valor_bruto) {
+      showToast('Preencha data, pedido, SKU e valor', 'err'); return
+    }
+    const recBruta = +form.valor_bruto
+    const calc = calcLinha(recBruta, +form.custo_produto, +form.custo_embalagem, imposto)
+    setSaving(true)
+    const { error } = await supabase.from('financeiro').insert({
+      ...form,
+      quantidade: +form.quantidade,
+      preco_unitario: +form.preco_unitario || recBruta,
+      valor_bruto: recBruta,
+      valor_liquido: calc.lucroOp,
+    })
+    setSaving(false)
+    if (error) { showToast('Erro: ' + error.message, 'err'); return }
+    showToast('Pedido adicionado!')
+    setForm(f => ({ ...f, numero_pedido: '', sku: '', nome_produto: '', quantidade: 1, preco_unitario: '', valor_bruto: '' }))
     loadData()
   }
 
-  const limparFiltros = () => { setSearch(''); setLojaFilter(''); setDateFrom(''); setDateTo('') }
-  const temFiltro = search || lojaFilter || dateFrom || dateTo
+  async function deletePedido(id: number) {
+    await supabase.from('financeiro').delete().eq('id', id)
+    setRows(prev => prev.filter(r => r.id !== id))
+  }
 
-  // Cálculos com imposto e embalagem
-  const totalBruto = filtered.reduce((s, i) => s + (i.valor_bruto || 0), 0)
-  const totalLiquido = filtered.reduce((s, i) => s + (i.valor_liquido || 0), 0)
-  const totalComissao = filtered.reduce((s, i) => s + (i.comissao_shopee || 0) + (i.taxas_shopee || 0), 0)
-  const totalDesconto = filtered.reduce((s, i) => s + (i.desconto || 0), 0)
-  const totalImposto = totalBruto * (pctImposto / 100)
-  const totalEmbalagem = filtered.length * custoEmbalagem
-  const lucroOperacional = totalLiquido - totalImposto - totalEmbalagem
+  async function limparPeriodo() {
+    if (!dateFrom && !dateTo) { showToast('Selecione um período para limpar', 'err'); return }
+    let q = supabase.from('financeiro').delete()
+    if (dateFrom) q = q.gte('data', dateFrom) as any
+    if (dateTo)   q = q.lte('data', dateTo)   as any
+    const { error } = await q
+    if (error) { showToast('Erro: ' + error.message, 'err'); return }
+    showToast('Período limpo!')
+    setConfirmDel(false)
+    loadData()
+  }
+
+  // Filtrar + calcular com lógica App.js
+  const filtered = useMemo(() => rows.filter(r => {
+    if (filterLoja !== 'Todas' && r.loja !== filterLoja) return false
+    if (dateFrom && r.data < dateFrom) return false
+    if (dateTo   && r.data > dateTo)   return false
+    return true
+  }).map(r => {
+    const recBruta = r.valor_bruto || 0
+    const cProd    = r.custo_produto    || 0
+    const cEmb     = (r.custo_embalagem || 0) + custoEmb
+    const calc     = calcLinha(recBruta, cProd, cEmb, imposto)
+    return { ...r, ...calc, recBruta }
+  }), [rows, filterLoja, dateFrom, dateTo, imposto, custoEmb])
+
+  const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
+  const totLuc  = filtered.reduce((s, r) => s + r.lucroOp,  0)
+  const totTaxa = filtered.reduce((s, r) => s + r.taxaShopee + r.taxaFixa, 0)
+  const totImp  = filtered.reduce((s, r) => s + r.imp, 0)
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240 }}>
+      <div style={{ width: 40, height: 40, border: '3px solid #ff660033', borderTop: '3px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Financeiro</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{filtered.length} registros</p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setShowConfig(!showConfig)} className="btn-secondary">
-            <Settings className="w-4 h-4" /> Configurar
-          </button>
-          <button onClick={() => setShowConfirmLimpar(true)} className="btn-secondary" style={{ color: 'var(--danger)', borderColor: 'rgba(255,61,113,0.3)' }}>
-            <Trash2 className="w-4 h-4" /> Limpar Período
-          </button>
-          <button onClick={() => exportToExcel(filtered.map(i => ({
-            'Pedido': i.pedido, 'Data': i.data, 'Loja': i.loja, 'Produto': i.produto, 'SKU': i.sku,
-            'Qtd': i.quantidade, 'Valor Bruto': i.valor_bruto, 'Desconto': i.desconto, 'Frete': i.frete,
-            'Comissão Shopee': i.comissao_shopee, 'Taxas Shopee': i.taxas_shopee, 'Valor Líquido': i.valor_liquido,
-            'Imposto': (i.valor_bruto * pctImposto / 100).toFixed(2), 'Embalagem': custoEmbalagem,
-            'Lucro Operacional': (i.valor_liquido - (i.valor_bruto * pctImposto / 100) - custoEmbalagem).toFixed(2),
-          })), 'financeiro')} className="btn-secondary">
-            <Download className="w-4 h-4" /> Excel
-          </button>
-          <button onClick={() => exportToPDF('Relatório Financeiro', [
-            { header: 'Data', dataKey: 'data' }, { header: 'Loja', dataKey: 'loja' },
-            { header: 'SKU', dataKey: 'sku' }, { header: 'Qtd', dataKey: 'quantidade' },
-            { header: 'Bruto', dataKey: 'valor_bruto' }, { header: 'Comissão', dataKey: 'comissao_shopee' },
-            { header: 'Líquido', dataKey: 'valor_liquido' },
-          ], filtered, 'financeiro')} className="btn-secondary">
-            <FileText className="w-4 h-4" /> PDF
-          </button>
-        </div>
+    <div>
+      {/* HEADER */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>💰 Financeiro — Pedidos Shopee</h2>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => setShowCfg(!showCfg)} style={S.btnSm as any}>⚙️ Configurar</button>
+        <button onClick={() => setShowForm(!showForm)} style={S.btnSm as any}>+ Pedido Manual</button>
+        <button onClick={() => fileRef.current?.click()} style={S.btn as any} disabled={saving}>
+          {saving ? '⏳ Importando...' : '📊 Importar Excel Shopee'}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleExcel} style={{ display: 'none' }} />
       </div>
 
-      {/* Config editável */}
-      {showConfig && (
-        <div className="card" style={{ border: '1px solid rgba(0,149,255,0.3)', background: 'rgba(0,149,255,0.05)' }}>
-          <p className="text-sm font-semibold mb-3" style={{ color: 'var(--info)' }}>⚙️ Configurações de Custo</p>
-          <div className="grid grid-cols-2 gap-4">
+      {/* PAINEL CONFIGURAÇÕES */}
+      {showCfg && (
+        <div style={{ ...S.card, marginBottom: 16, background: '#0f1a0f', border: '1px solid #22c55e33' }}>
+          <div style={{ fontSize: 12, color: '#22c55e', fontWeight: 700, marginBottom: 12 }}>⚙️ CONFIGURAÇÕES DE CÁLCULO</div>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
-              <label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Imposto (% sobre faturamento bruto)
-              </label>
-              <div className="flex items-center gap-2">
-                <input type="number" min={0} max={100} step={0.1} value={pctImposto}
-                  onChange={e => setPctImposto(+e.target.value)} className="input-field w-28" />
-                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>% = {formatCurrency(totalImposto)}</span>
-              </div>
+              <label style={S.label}>Imposto sobre Receita (%)</label>
+              <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
+                style={{ ...S.inp, width: 100 } as any} step="0.1" min="0" max="50" />
             </div>
             <div>
-              <label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>
-                Custo de Embalagem (R$ por pedido)
-              </label>
-              <div className="flex items-center gap-2">
-                <input type="number" min={0} step={0.01} value={custoEmbalagem}
-                  onChange={e => setCustoEmbalagem(+e.target.value)} className="input-field w-28" />
-                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>= {formatCurrency(totalEmbalagem)}</span>
-              </div>
+              <label style={S.label}>Custo Embalagem Adicional (R$/pedido)</label>
+              <input type="number" value={custoEmb} onChange={e => setCustoEmb(+e.target.value)}
+                style={{ ...S.inp, width: 120 } as any} step="0.01" min="0" />
+            </div>
+            <div style={{ fontSize: 11, color: '#555', padding: '8px 12px', background: '#13131e', borderRadius: 6 }}>
+              <div>Taxa Shopee: <strong style={{ color: '#ff9933' }}>20%</strong></div>
+              <div>Taxa Fixa: <strong style={{ color: '#ff9933' }}>R$ 4,05/pedido</strong></div>
             </div>
           </div>
         </div>
       )}
 
-      {msg && (
-        <div className="p-3 rounded-lg text-sm" style={{
-          background: 'rgba(0,214,143,0.1)', color: 'var(--success)', border: '1px solid rgba(0,214,143,0.2)'
-        }}>{msg}</div>
+      {/* FORM MANUAL */}
+      {showForm && (
+        <div style={{ ...S.card, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: '#888', marginBottom: 10, fontWeight: 600 }}>+ ADICIONAR PEDIDO MANUALMENTE</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10 }}>
+            {([
+              ['Data', 'date', 'data'], ['Nº Pedido', 'text', 'numero_pedido'],
+              ['SKU', 'text', 'sku'], ['Produto', 'text', 'nome_produto'],
+              ['Qtd', 'number', 'quantidade'], ['Valor Unit R$', 'number', 'preco_unitario'],
+              ['Valor Bruto R$', 'number', 'valor_bruto'], ['Custo Prod R$', 'number', 'custo_produto'],
+            ] as [string, string, string][]).map(([lbl, type, field]) => (
+              <div key={field}>
+                <label style={S.label}>{lbl}</label>
+                <input type={type} value={(form as any)[field]} onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+                  style={S.inp as any} step={type === 'number' ? '0.01' : undefined} />
+              </div>
+            ))}
+            <div>
+              <label style={S.label}>Loja</label>
+              <select value={form.loja} onChange={e => setForm(f => ({ ...f, loja: e.target.value }))} style={S.inp as any}>
+                {LOJAS.map(l => <option key={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button style={S.btn as any} onClick={addManual} disabled={saving}>Adicionar Pedido</button>
+            <button style={S.btnSm as any} onClick={() => setShowForm(false)}>Cancelar</button>
+          </div>
+        </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Faturamento Bruto" value={formatCurrency(totalBruto)} icon={DollarSign} color="#EE2C00" sub={`Desconto: ${formatCurrency(totalDesconto)}`} />
-        <StatCard title="Receita Líquida" value={formatCurrency(totalLiquido)} icon={TrendingUp} color="#00d68f" sub="Após taxas Shopee" />
-        <StatCard title="Taxas & Comissões" value={formatCurrency(totalComissao)} icon={TrendingDown} color="#ff3d71" sub="Comissão + taxa serviço" />
-        <StatCard title="Lucro Operacional" value={formatCurrency(lucroOperacional)} icon={TrendingUp} color="#0095ff"
-          sub={`Imp: ${formatCurrency(totalImposto)} | Emb: ${formatCurrency(totalEmbalagem)}`} />
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9 w-48" placeholder="Pedido, SKU..." />
-        </div>
-        <select value={lojaFilter} onChange={e => setLojaFilter(e.target.value)} className="input-field w-52">
-          <option value="">Todas as lojas</option>
-          {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
+      {/* FILTROS */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={filterLoja} onChange={e => setFilterLoja(e.target.value)} style={{ ...S.inp, width: 'auto', fontSize: 12 } as any}>
+          <option>Todas</option>{LOJAS.map(l => <option key={l}>{l}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-field w-40" />
-        <span style={{ color: 'var(--text-muted)' }}>até</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-field w-40" />
-        {temFiltro && (
-          <button onClick={limparFiltros} className="btn-secondary"><X className="w-4 h-4" /> Limpar Filtros</button>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
+        <span style={{ color: '#555', fontSize: 12 }}>até</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
+        {(dateFrom || dateTo) && (
+          confirmDel
+            ? <>
+                <span style={{ fontSize: 12, color: '#ef4444' }}>Confirmar limpeza?</span>
+                <button onClick={limparPeriodo} style={{ ...S.btnDanger, fontSize: 12 } as any}>✓ Sim</button>
+                <button onClick={() => setConfirmDel(false)} style={S.btnSm as any}>✕ Não</button>
+              </>
+            : <button onClick={() => setConfirmDel(true)} style={S.btnDanger as any}>🗑️ Limpar Período</button>
         )}
       </div>
 
-      {/* Table */}
-      <div className="table-container overflow-x-auto">
-        <div style={{ minWidth: '1000px' }}>
-          <div className="grid table-header" style={{ gridTemplateColumns: '100px 110px 1fr 50px 90px 90px 90px 80px 100px 100px' }}>
-            <span>Data</span><span>Loja</span><span>Produto/SKU</span><span>Qtd</span>
-            <span className="text-right">Bruto</span><span className="text-right">Desconto</span>
-            <span className="text-right">Comissão</span><span className="text-right">Frete</span>
-            <span className="text-right">Líquido</span><span className="text-right">Lucro Op.</span>
-          </div>
-          {loading ? (
-            <div className="text-center py-12" style={{ color: 'var(--text-secondary)' }}>Carregando...</div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-12">
-              <DollarSign className="w-12 h-12 mx-auto mb-3 opacity-20" />
-              <p style={{ color: 'var(--text-secondary)' }}>Nenhum registro financeiro</p>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Importe o relatório da Shopee em Vendas</p>
-            </div>
-          ) : filtered.map(item => {
-            const imposto = item.valor_bruto * (pctImposto / 100)
-            const lucroOp = item.valor_liquido - imposto - custoEmbalagem
-            return (
-              <div key={item.id} className="grid table-row items-center"
-                style={{ gridTemplateColumns: '100px 110px 1fr 50px 90px 90px 90px 80px 100px 100px' }}>
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{item.data}</span>
-                <span className="text-sm">{item.loja?.split(' ')[0]}</span>
-                <div>
-                  <p className="text-sm font-medium truncate">{item.produto || item.sku}</p>
-                  <p className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{item.sku}</p>
-                </div>
-                <span className="text-sm text-center">{item.quantidade}</span>
-                <span className="text-right text-sm">{formatCurrency(item.valor_bruto)}</span>
-                <span className="text-right text-sm" style={{ color: 'var(--warning)' }}>-{formatCurrency(item.desconto)}</span>
-                <span className="text-right text-sm" style={{ color: 'var(--danger)' }}>-{formatCurrency(item.comissao_shopee)}</span>
-                <span className="text-right text-sm">{formatCurrency(item.frete)}</span>
-                <span className="text-right font-semibold text-sm" style={{ color: 'var(--success)' }}>{formatCurrency(item.valor_liquido)}</span>
-                <span className="text-right font-semibold text-sm" style={{ color: lucroOp >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                  {formatCurrency(lucroOp)}
-                </span>
-              </div>
-            )
-          })}
-        </div>
+      {/* TOTALIZADOR */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 10, padding: '8px 14px', background: '#13131e', borderRadius: 8, border: '1px solid #2a2a3a', fontSize: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ color: '#555' }}>{N(filtered.length)} linhas</span>
+        <span style={{ color: '#ff9933', fontFamily: 'monospace', fontWeight: 700 }}>Receita: {R(totRec)}</span>
+        <span style={{ color: '#f59e0b', fontFamily: 'monospace' }}>Taxas: {R(totTaxa)}</span>
+        <span style={{ color: '#888', fontFamily: 'monospace' }}>Imposto: {R(totImp)}</span>
+        <span style={{ color: totLuc >= 0 ? '#22c55e' : '#ef4444', fontFamily: 'monospace', fontWeight: 700 }}>Lucro Op: {R(totLuc)}</span>
+        <span style={{ color: '#a78bfa', fontFamily: 'monospace' }}>Margem: {P(totRec > 0 ? totLuc / totRec : 0)}</span>
       </div>
 
-      {/* Modal limpeza */}
-      {showConfirmLimpar && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="card w-full max-w-md" style={{ padding: '32px' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6" style={{ color: 'var(--danger)' }} />
-              <h2 className="font-bold text-lg">Confirmar Limpeza</h2>
-            </div>
-            <div className="p-3 rounded-lg mb-4 text-sm space-y-1" style={{ background: 'var(--bg-hover)' }}>
-              {lojaFilter && <p>Loja: <strong>{lojaFilter}</strong></p>}
-              {dateFrom && <p>De: <strong>{dateFrom}</strong></p>}
-              {dateTo && <p>Até: <strong>{dateTo}</strong></p>}
-              {!lojaFilter && !dateFrom && !dateTo && <p style={{ color: 'var(--danger)' }}>⚠️ Sem filtro — TODOS os registros serão apagados!</p>}
-              <p style={{ color: 'var(--warning)' }}>Registros a remover: <strong>{filtered.length}</strong></p>
-            </div>
-            <p className="text-xs mb-5" style={{ color: 'var(--danger)' }}>Esta ação não pode ser desfeita.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowConfirmLimpar(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleLimparPeriodo} disabled={limpando} className="btn-primary flex-1" style={{ background: 'var(--danger)' }}>
-                {limpando ? 'Removendo...' : 'Confirmar Exclusão'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* TABELA PRINCIPAL */}
+      <div style={S.card}>
+        <Table
+          headers={['Data', 'Loja', 'Pedido', 'SKU', 'Produto', 'Qtd', 'Vl Unit', 'Rec Bruta', 'Taxa Shop', 'Taxa Fixa', 'Custo Prod', 'Imposto', 'Custo Total', 'Lucro Op', 'Margem', '']}
+          rows={filtered.map(p => [
+            p.data,
+            <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
+            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.numero_pedido}</span>,
+            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku}</span>,
+            <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{p.nome_produto}</span>,
+            N(p.quantidade),
+            R(p.preco_unitario || 0),
+            <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.recBruta)}</span>,
+            <span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(p.taxaShopee)}</span>,
+            <span style={{ fontFamily: 'monospace' }}>{R(p.taxaFixa)}</span>,
+            <span style={{ fontFamily: 'monospace' }}>{R(p.custoProd || 0)}</span>,
+            <span style={{ fontFamily: 'monospace' }}>{R(p.imp)}</span>,
+            <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.custoTotal)}</span>,
+            <span style={{ fontFamily: 'monospace', color: p.lucroOp >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(p.lucroOp)}</span>,
+            <StatusBadge v={p.margem} />,
+            <button onClick={() => deletePedido(p.id)} style={S.btnDanger as any}>✕</button>,
+          ])}
+          emptyMsg="Nenhum pedido. Importe o Excel da Shopee ou adicione manualmente."
+        />
+      </div>
+
+      {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   )
 }
