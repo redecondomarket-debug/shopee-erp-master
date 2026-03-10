@@ -13,7 +13,8 @@ const TABS = [
   { href: '/analise-ads',      icon: '📈', label: 'Análise Ads'      },
   { href: '/composicao',       icon: '🧩', label: 'Composição'       },
   { href: '/produtos-base',    icon: '🗂️', label: 'Produtos Base'    },
-  { href: '/ordem-compra',     icon: '🛒', label: 'Ordem de Compra'  },
+  { href: '/compras',          icon: '🛒', label: 'Ordem de Compra'  },
+  { href: '/relatorios',       icon: '📋', label: 'Relatórios'       },
 ]
 
 export default function Sidebar() {
