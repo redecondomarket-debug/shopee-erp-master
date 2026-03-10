@@ -74,7 +74,7 @@ export default function DREPage() {
 
   // ── Calcular linhas por dia×loja (idêntico ao TabDRE do App.js) ──────────
   const rows = useMemo(() => {
-    const keys = [...new Set(finF.map(f => modo === 'resumido' ? f.data : `${f.data}||${f.loja}`))]
+    const keys = Array.from(new Set(finF.map(f => modo === 'resumido' ? f.data : `${f.data}||${f.loja}`)))
     return keys.sort().reverse().map(k => {
       const [data, loja] = modo === 'resumido' ? [k, null] : k.split('||')
       const lp    = modo === 'resumido'
