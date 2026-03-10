@@ -1,8 +1,9 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { exportToExcel, exportToPDF, parseShopeeReport } from '@/lib/exports'
+import { exportToExcel, exportToPDF } from '@/lib/exports'
 import { ShoppingCart, Upload, Plus, Download, FileText, Search, X, Loader2, Store } from 'lucide-react'
+import * as XLSX from 'xlsx'
 
 type Venda = {
   id: string
@@ -17,8 +18,39 @@ type Venda = {
 
 const LOJAS = ['KL Market', 'Universo dos Achados', 'Mundo dos Achados']
 
+// Status de pedidos que devem ser importados (ignorar cancelados)
+const STATUS_VALIDOS = [
+  'concluído', 'concluido', 'entregue', 'enviado',
+  'order received', 'completed', 'delivered', 'shipped',
+  'o comprador pode pedir uma devolução'
+]
+
 function formatCurrency(val: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
+}
+
+function parseValor(val: unknown): number {
+  if (val === null || val === undefined || val === '') return 0
+  if (typeof val === 'number') return val
+  return parseFloat(String(val).replace(/[^0-9.,]/g, '').replace(',', '.')) || 0
+}
+
+function parseData(val: unknown): string {
+  if (!val) return new Date().toISOString().split('T')[0]
+  const str = String(val)
+  // formato: 2026-01-28 20:49
+  const match = str.match(/(\d{4}-\d{2}-\d{2})/)
+  if (match) return match[1]
+  return new Date().toISOString().split('T')[0]
+}
+
+function mapearLoja(lojaRaw: unknown): string {
+  if (!lojaRaw) return LOJAS[0]
+  const l = String(lojaRaw).toLowerCase().trim()
+  if (l.includes('kl') || l.includes('kl market')) return 'KL Market'
+  if (l.includes('universo')) return 'Universo dos Achados'
+  if (l.includes('mundo')) return 'Mundo dos Achados'
+  return lojaRaw as string
 }
 
 export default function VendasPage() {
@@ -62,6 +94,7 @@ export default function VendasPage() {
   }
 
   async function processarBaixaEstoque(skuVenda: string, quantidade: number) {
+    if (!skuVenda) return
     const { data: maps } = await supabase.from('sku_map').select('*').eq('sku_venda', skuVenda)
     if (!maps || maps.length === 0) return
 
@@ -78,7 +111,7 @@ export default function VendasPage() {
         tipo: 'VENDA',
         sku_base: map.sku_base,
         quantidade: qtdBaixa,
-        origem: 'Venda manual',
+        origem: 'Importação Shopee',
         observacao: `SKU Venda: ${skuVenda}`,
       })
     }
@@ -103,61 +136,95 @@ export default function VendasPage() {
     setImportMsg('Lendo arquivo...')
 
     try {
-      const rows = await parseShopeeReport(file)
+      const buffer = await file.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, { defval: '' })
+
       let inserted = 0
-      let errors = 0
+      let ignorados = 0
+      let erros = 0
 
       setImportMsg(`Processando ${rows.length} linhas...`)
 
       for (const row of rows) {
-        // Map Shopee columns (flexible mapping)
-        const pedido = row['Order ID'] || row['Número do pedido'] || row['order_id'] || ''
-        const data = row['Order Creation Date'] || row['Data de criação do pedido'] || row['order_date'] || new Date().toISOString().split('T')[0]
-        const sku = row['SKU'] || row['Seller SKU'] || row['sku'] || ''
-        const produto = row['Product Name'] || row['Nome do produto'] || ''
-        const qty = parseInt(row['Quantity'] || row['Quantidade'] || '1') || 1
-        const valor = parseFloat((row['Original Price'] || row['Preço original'] || '0').replace(/[^0-9.]/g, '')) || 0
-        const loja = row['Store Name'] || row['Nome da loja'] || LOJAS[0]
-        const desconto = parseFloat((row['Discount'] || row['Desconto'] || '0').replace(/[^0-9.]/g, '')) || 0
-        const frete = parseFloat((row['Shipping Fee'] || row['Frete'] || '0').replace(/[^0-9.]/g, '')) || 0
-        const comissao = parseFloat((row['Shopee Commission'] || row['Comissão Shopee'] || '0').replace(/[^0-9.]/g, '')) || 0
-        const taxas = parseFloat((row['Shopee Fee'] || row['Taxa Shopee'] || '0').replace(/[^0-9.]/g, '')) || 0
-        const liquido = parseFloat((row['Final Amount Received'] || row['Valor recebido'] || '0').replace(/[^0-9.]/g, '')) || 0
-        const status = row['Order Status'] || row['Status'] || 'Completed'
+        // Mapeamento correto das colunas do relatório Shopee Brasil
+        const pedido = String(row['ID do pedido'] || '').trim()
+        const status = String(row['Status do pedido'] || '').toLowerCase().trim()
+        const sku = String(row['Número de referência SKU'] || row['Nº de referência do SKU principal'] || '').trim()
+        const produto = String(row['Nome do Produto'] || '').trim()
+        const dataStr = parseData(row['Data de criação do pedido'])
+        const qty = parseInt(String(row['Quantidade'] || '1')) || 1
+        const valorBruto = parseValor(row['Preço original'])
+        const valorAcordado = parseValor(row['Preço acordado'])
+        const totalGlobal = parseValor(row['Total global'])
+        const desconto = parseValor(row['Desconto do vendedor'])
+        const frete = parseValor(row['Taxa de envio pagas pelo comprador'])
+        const comissao = parseValor(row['Taxa de comissão bruta'])
+        const taxas = parseValor(row['Taxa de serviço líquida'])
+        const lojaRaw = row['LOJA'] || row['Loja'] || row['Store Name'] || ''
+        const loja = mapearLoja(lojaRaw)
 
         if (!pedido) continue
 
-        // Insert venda
+        // Ignorar pedidos cancelados/devolvidos
+        const statusValido = STATUS_VALIDOS.some(s => status.includes(s))
+        if (!statusValido) {
+          ignorados++
+          continue
+        }
+
+        if (!sku) {
+          ignorados++
+          continue
+        }
+
+        // Verificar se pedido já foi importado
+        const { data: existing } = await supabase
+          .from('vendas')
+          .select('id')
+          .eq('pedido', pedido)
+          .eq('sku_venda', sku)
+          .limit(1)
+
+        if (existing && existing.length > 0) {
+          ignorados++
+          continue
+        }
+
         const { error: vErr } = await supabase.from('vendas').insert({
-          data: data.split(' ')[0] || data,
-          loja: LOJAS.find(l => l.toLowerCase().includes(loja.toLowerCase())) || LOJAS[0],
+          data: dataStr,
+          loja,
           pedido,
           sku_venda: sku,
           quantidade: qty,
-          valor_venda: valor,
+          valor_venda: totalGlobal || valorAcordado || valorBruto,
         })
 
-        // Insert financeiro
         await supabase.from('financeiro').insert({
           pedido,
-          data: data.split(' ')[0] || data,
+          data: dataStr,
           produto,
           sku,
           quantidade: qty,
-          valor_bruto: valor,
+          valor_bruto: valorBruto,
           desconto,
           frete,
           comissao_shopee: comissao,
           taxas_shopee: taxas,
-          valor_liquido: liquido,
-          loja: LOJAS.find(l => l.toLowerCase().includes(loja.toLowerCase())) || LOJAS[0],
+          valor_liquido: totalGlobal,
+          loja,
         })
 
-        if (!vErr) { inserted++; await processarBaixaEstoque(sku, qty) }
-        else errors++
+        if (!vErr) {
+          inserted++
+          await processarBaixaEstoque(sku, qty)
+        } else {
+          erros++
+        }
       }
 
-      setImportMsg(`✅ ${inserted} vendas importadas! ${errors > 0 ? `${errors} erros.` : ''}`)
+      setImportMsg(`✅ ${inserted} vendas importadas! ${ignorados > 0 ? `${ignorados} ignoradas (duplicadas/canceladas).` : ''} ${erros > 0 ? `${erros} erros.` : ''}`)
       loadData()
     } catch (err) {
       setImportMsg(`❌ Erro ao importar: ${err}`)
@@ -214,7 +281,6 @@ export default function VendasPage() {
         </div>
       )}
 
-      {/* Filters */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -233,7 +299,6 @@ export default function VendasPage() {
         )}
       </div>
 
-      {/* Table */}
       <div className="table-container">
         <div className="grid grid-cols-6 table-header">
           <span>Data</span><span>Loja</span><span>Pedido</span>
@@ -264,7 +329,6 @@ export default function VendasPage() {
         )}
       </div>
 
-      {/* Add Modal */}
       {showAdd && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
           <div className="card w-full max-w-md" style={{ padding: '32px' }}>
