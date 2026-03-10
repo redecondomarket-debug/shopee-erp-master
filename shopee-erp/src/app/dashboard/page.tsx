@@ -1,249 +1,301 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { DollarSign, ShoppingCart, Package, TrendingUp, AlertTriangle, Store, X, Target } from 'lucide-react'
 
-const LOJAS = ['KL Market', 'Universo dos Achados', 'Mundo dos Achados']
-const LOJA_COLORS = ['#EE2C00', '#FF6535', '#FF9970']
+// ─── CONSTANTS (idênticas ao App.js) ─────────────────────────────────────────
+const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
+const LOJA_COLORS: Record<string, string> = {
+  'KL MARKET': '#ff6600',
+  'UNIVERSO DOS ACHADOS': '#0ea5e9',
+  'MUNDO DOS ACHADOS': '#a855f7',
+}
+const TAXA_SHOPEE = 0.20
+const TAXA_FIXA = 4.05
 
-function formatCurrency(val: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
+const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
+const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
+
+// ─── UI ATOMS (idênticos ao App.js) ──────────────────────────────────────────
+const S: Record<string, React.CSSProperties> = {
+  card:      { background: '#16161f', border: '1px solid #2a2a3a', borderRadius: 10, padding: 16 },
+  th:        { padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#888', letterSpacing: 0.8, textTransform: 'uppercase', borderBottom: '1px solid #2a2a3a', whiteSpace: 'nowrap' },
+  td:        { padding: '7px 12px', fontSize: 12.5, borderBottom: '1px solid #1e1e2a', whiteSpace: 'nowrap' },
+  inp:       { background: '#0f0f13', border: '1px solid #2a2a3a', borderRadius: 6, padding: '7px 10px', color: '#e8e8f0', fontSize: 13, width: '100%', outline: 'none', boxSizing: 'border-box' },
+  btn:       { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  btnSm:     { background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 11 },
 }
 
-function StatCard({ title, value, icon: Icon, color, subtitle }: {
-  title: string; value: string; icon: React.ElementType; color: string; subtitle?: string
-}) {
+function Badge({ children, color = '#ff6600' }: { children: React.ReactNode; color?: string }) {
   return (
-    <div className="stat-card">
-      <div className="absolute top-0 right-0 w-24 h-24 rounded-full opacity-5"
-        style={{ background: color, transform: 'translate(30%, -30%)' }} />
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>{title}</p>
-          <p className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--text-primary)' }}>{value}</p>
-          {subtitle && <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{subtitle}</p>}
+    <span style={{ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>
+      {children}
+    </span>
+  )
+}
+function StatusBadge({ v }: { v: number }) {
+  if (v >= 0.20) return <Badge color="#22c55e">▲ {P(v)}</Badge>
+  if (v >= 0.10) return <Badge color="#f59e0b">● {P(v)}</Badge>
+  return <Badge color="#ef4444">▼ {P(v)}</Badge>
+}
+function ROASBadge({ v }: { v: number }) {
+  const color = v >= 2 ? '#22c55e' : v >= 1 ? '#f59e0b' : '#ef4444'
+  return <Badge color={color}>{(+v || 0).toFixed(2)}x</Badge>
+}
+function KPI({ label, value, sub, color = '#ff9933', icon }: any) {
+  return (
+    <div style={{ ...S.card, flex: 1, minWidth: 150 }}>
+      <div style={{ fontSize: 22, marginBottom: 4 }}>{icon}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', letterSpacing: -1 }}>{value}</div>
+      <div style={{ fontSize: 11, color: '#888', marginTop: 2, fontWeight: 600 }}>{label}</div>
+      {sub && <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{sub}</div>}
+    </div>
+  )
+}
+function MiniBar({ data, height = 100, colorFn }: { data: { l: string; v: number }[]; height?: number; colorFn?: (i: number) => string }) {
+  const max = Math.max(...data.map(d => d.v), 1)
+  const defaultColors = ['#ff6600', '#0ea5e9', '#a855f7', '#22c55e', '#f59e0b']
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height, padding: '4px 0' }}>
+      {data.map((d, i) => (
+        <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+          <div style={{ width: '100%', background: colorFn ? colorFn(i) : defaultColors[i % defaultColors.length], borderRadius: '3px 3px 0 0', height: `${(d.v / max) * (height - 20)}px`, minHeight: d.v > 0 ? 3 : 0, transition: 'height .4s' }} />
+          <span style={{ fontSize: 9, color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: 50, textOverflow: 'ellipsis', textAlign: 'center' }}>{d.l}</span>
         </div>
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `${color}20` }}>
-          <Icon className="w-5 h-5" style={{ color }} />
-        </div>
-      </div>
+      ))}
+    </div>
+  )
+}
+function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]; rows: React.ReactNode[][]; emptyMsg?: string }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr>{headers.map((h, i) => <th key={i} style={S.th as any}>{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.length === 0
+            ? <tr><td colSpan={headers.length} style={{ ...S.td, color: '#555', textAlign: 'center', padding: 32 } as any}>{emptyMsg}</td></tr>
+            : rows.map((r, i) => <tr key={i} style={{ cursor: 'default' }}>{r.map((c, j) => <td key={j} style={S.td as any}>{c}</td>)}</tr>)
+          }
+        </tbody>
+      </table>
     </div>
   )
 }
 
+// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [vendas, setVendas] = useState<{ data: string; valor_venda: number; loja: string; sku_venda: string; quantidade: number }[]>([])
-  const [estoque, setEstoque] = useState<{ sku_base: string; produto: string; estoque_atual: number; estoque_minimo: number }[]>([])
-  const [financeiro, setFinanceiro] = useState<{ valor_liquido: number; valor_bruto: number; comissao_shopee: number; taxas_shopee: number; desconto: number; frete: number; loja: string; data: string }[]>([])
-  const [ads, setAds] = useState<{ investimento: number; vendas_geradas: number; loja: string; data: string }[]>([])
-  const [loading, setLoading] = useState(true)
-  const [lojaFilter, setLojaFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [financeiro, setFinanceiro] = useState<any[]>([])
+  const [ads,        setAds]        = useState<any[]>([])
+  const [estoque,    setEstoque]    = useState<any[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [lojaFiltro, setLojaFiltro] = useState('Todas')
+  const [dateFrom,   setDateFrom]   = useState('')
+  const [dateTo,     setDateTo]     = useState('')
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
-    const [vendasRes, estoqueRes, financeiroRes, adsRes] = await Promise.all([
-      supabase.from('vendas').select('data, valor_venda, loja, sku_venda, quantidade').order('data', { ascending: false }).limit(2000),
-      supabase.from('estoque').select('sku_base, produto, estoque_atual, estoque_minimo'),
-      supabase.from('financeiro').select('valor_liquido, valor_bruto, comissao_shopee, taxas_shopee, desconto, frete, loja, data'),
-      supabase.from('ads').select('investimento, vendas_geradas, loja, data'),
+    setLoading(true)
+    const [finRes, adsRes, estRes] = await Promise.all([
+      supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
+      supabase.from('ads').select('*').order('data', { ascending: false }),
+      supabase.from('estoque').select('*'),
     ])
-    setVendas(vendasRes.data || [])
-    setEstoque(estoqueRes.data || [])
-    setFinanceiro(financeiroRes.data || [])
+    setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
+    setEstoque(estRes.data || [])
     setLoading(false)
   }
 
-  const limparFiltros = () => { setLojaFilter(''); setDateFrom(''); setDateTo('') }
-  const temFiltro = lojaFilter || dateFrom || dateTo
-
-  const vendasFiltradas = vendas.filter(v => {
-    if (lojaFilter && v.loja !== lojaFilter) return false
-    if (dateFrom && v.data < dateFrom) return false
-    if (dateTo && v.data > dateTo) return false
-    return true
-  })
-  const financeiroFiltrado = financeiro.filter(f => {
-    if (lojaFilter && f.loja !== lojaFilter) return false
+  const finF = useMemo(() => financeiro.filter(f => {
+    if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return false
     if (dateFrom && f.data < dateFrom) return false
-    if (dateTo && f.data > dateTo) return false
+    if (dateTo   && f.data > dateTo)   return false
     return true
-  })
-  const adsFiltrados = ads.filter(a => {
-    if (lojaFilter && a.loja !== lojaFilter) return false
+  }), [financeiro, lojaFiltro, dateFrom, dateTo])
+
+  const adsF = useMemo(() => ads.filter(a => {
+    if (lojaFiltro !== 'Todas' && a.loja !== lojaFiltro) return false
     if (dateFrom && a.data < dateFrom) return false
-    if (dateTo && a.data > dateTo) return false
+    if (dateTo   && a.data > dateTo)   return false
     return true
+  }), [ads, lojaFiltro, dateFrom, dateTo])
+
+  // ── KPIs (lógica idêntica ao App.js) ──────────────────────────────────────
+  const totalRec   = finF.reduce((s, f) => s + (f.valor_bruto  || 0), 0)
+  const totalLucOp = finF.reduce((s, f) => s + (f.valor_liquido || 0), 0)
+  const totalAds   = adsF.reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+  const lucroLiq   = totalLucOp - totalAds
+  const margemLiq  = totalRec > 0 ? lucroLiq / totalRec : 0
+  const roas       = totalAds  > 0 ? totalRec / totalAds  : 0
+  const pedSet     = new Set(finF.map(f => f.numero_pedido)).size
+  const ticket     = pedSet > 0 ? totalRec / pedSet : 0
+
+  // Resultado por loja (igual ao App.js)
+  const porLoja = LOJAS.map(loja => {
+    const lp   = finF.filter(f => f.loja === loja)
+    const rec  = lp.reduce((s, f) => s + (f.valor_bruto   || 0), 0)
+    const lucOp= lp.reduce((s, f) => s + (f.valor_liquido || 0), 0)
+    const gads = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+    const ll   = lucOp - gads
+    return { loja, rec, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, peds: new Set(lp.map(f => f.numero_pedido)).size }
   })
 
-  const totalBruto = financeiroFiltrado.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-  const totalTaxas = financeiroFiltrado.reduce((s, f) => s + (f.comissao_shopee || 0) + (f.taxas_shopee || 0), 0)
-  const totalDescontos = financeiroFiltrado.reduce((s, f) => s + (f.desconto || 0), 0)
-  const totalLiquido = financeiroFiltrado.reduce((s, f) => s + (f.valor_liquido || 0), 0)
-  const totalAds = adsFiltrados.reduce((s, a) => s + (a.investimento || 0), 0)
-  const lucroLiquido = totalLiquido - totalAds
-  const totalPedidos = vendasFiltradas.length
-  const ticketMedio = totalPedidos > 0 ? totalBruto / totalPedidos : 0
-  const roasGeral = totalAds > 0 ? totalLiquido / totalAds : 0
-  const margemLiquida = totalBruto > 0 ? (lucroLiquido / totalBruto) * 100 : 0
-  const alertasEstoque = estoque.filter(e => e.estoque_atual <= e.estoque_minimo)
-
-  const faturamentoPorLoja = LOJAS.map(loja => ({
-    loja: loja.split(' ')[0],
-    total: financeiroFiltrado.filter(f => f.loja === loja).reduce((s, f) => s + (f.valor_bruto || 0), 0),
-    liquido: financeiroFiltrado.filter(f => f.loja === loja).reduce((s, f) => s + (f.valor_liquido || 0), 0),
-  }))
-
-  const porSku = vendasFiltradas.reduce((acc, v) => {
-    if (!acc[v.sku_venda]) acc[v.sku_venda] = { sku: v.sku_venda, qtd: 0, valor: 0 }
-    acc[v.sku_venda].qtd += v.quantidade || 1
-    acc[v.sku_venda].valor += v.valor_venda || 0
-    return acc
-  }, {} as Record<string, { sku: string; qtd: number; valor: number }>)
-  const topProdutos = Object.values(porSku).sort((a, b) => b.valor - a.valor).slice(0, 5)
-
-  const chartData = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date(); d.setDate(d.getDate() - (13 - i))
-    const dateStr = d.toISOString().split('T')[0]
-    const label = d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
-    const bruto = financeiroFiltrado.filter(f => f.data?.startsWith(dateStr)).reduce((s, f) => s + (f.valor_bruto || 0), 0)
-    const liquido = financeiroFiltrado.filter(f => f.data?.startsWith(dateStr)).reduce((s, f) => s + (f.valor_liquido || 0), 0)
-    return { label, bruto, liquido }
+  // Top SKUs
+  const skuMap: Record<string, any> = {}
+  finF.forEach(f => {
+    const sku = f.sku || 'SEM SKU'
+    if (!skuMap[sku]) skuMap[sku] = { sku, nome: f.nome_produto || sku, rec: 0, lucro: 0, qtd: 0 }
+    skuMap[sku].rec   += f.valor_bruto   || 0
+    skuMap[sku].lucro += f.valor_liquido || 0
+    skuMap[sku].qtd   += f.quantidade    || 1
   })
+  const topSkus = Object.values(skuMap).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
+
+  // Chart por dia
+  const byDay: Record<string, number> = {}
+  finF.forEach(f => { byDay[f.data] = (byDay[f.data] || 0) + (f.valor_bruto || 0) })
+  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(5), v }))
+
+  // Alertas de estoque
+  const criticos = estoque.filter(e => (e.estoque_atual || 0) <= (e.estoque_minimo || 0))
+
+  const temFiltro = lojaFiltro !== 'Todas' || dateFrom || dateTo
 
   if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-10 h-10 border-2 rounded-full animate-spin mx-auto"
-        style={{ borderColor: 'var(--shopee-primary)', borderTopColor: 'transparent' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240 }}>
+      <div style={{ width: 40, height: 40, border: '3px solid #ff660033', borderTop: '3px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
     </div>
   )
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-start justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Dashboard</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {lojaFilter || 'Todas as lojas'}{(dateFrom || dateTo) && ` · ${dateFrom || '...'} até ${dateTo || '...'}`}
-          </p>
+    <div>
+      {/* FILTROS */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['Todas', ...LOJAS].map(l => {
+            const cor = LOJA_COLORS[l] || '#ff6600'
+            const ativo = lojaFiltro === l
+            const label = l === 'Todas' ? 'Todas' : l === 'KL MARKET' ? 'KL' : l === 'UNIVERSO DOS ACHADOS' ? 'UNIVERSO' : 'MUNDO'
+            return (
+              <button key={l} onClick={() => setLojaFiltro(l)} style={{
+                background: ativo ? cor + '33' : 'transparent',
+                border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
+                color: ativo ? cor : '#555',
+                borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+                fontSize: 12, fontWeight: ativo ? 700 : 400, transition: 'all .15s'
+              }}>{label}</button>
+            )
+          })}
         </div>
-        <div className="flex gap-2 flex-wrap items-center">
-          <select value={lojaFilter} onChange={e => setLojaFilter(e.target.value)} className="input-field w-48">
-            <option value="">Todas as lojas</option>
-            {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-field w-36" />
-          <span style={{ color: 'var(--text-muted)' }}>até</span>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-field w-36" />
-          {temFiltro && <button onClick={limparFiltros} className="btn-secondary"><X className="w-4 h-4" /> Limpar</button>}
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
+        <span style={{ color: '#555', fontSize: 12 }}>até</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
+        {temFiltro && (
+          <button onClick={() => { setLojaFiltro('Todas'); setDateFrom(''); setDateTo('') }} style={S.btnSm as any}>
+            ✕ Limpar filtros
+          </button>
+        )}
+        <button onClick={loadData} style={{ ...S.btnSm, marginLeft: 'auto' } as any}>🔄 Atualizar</button>
+      </div>
+
+      {/* 6 KPIs (idêntico ao App.js) */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+        <KPI icon="💰" label="Faturamento Total"  value={R(totalRec)}          color="#ff9933"                                              sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
+        <KPI icon="✅" label="Lucro Líquido Real" value={R(lucroLiq)}           color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'}               sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
+        <KPI icon="📈" label="Margem Líquida"     value={P(margemLiq)}          color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
+        <KPI icon="📣" label="Total Shopee Ads"   value={R(totalAds)}           color="#e67e22"                                              sub={`ROAS: ${roas.toFixed(2)}x`} />
+        <KPI icon="⚡" label="ROAS Geral"         value={`${roas.toFixed(2)}x`} color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'} sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
+        <KPI icon="🛒" label="Total de Pedidos"   value={N(pedSet)}             color="#a78bfa"                                              sub={`Ticket médio: ${R(ticket)}`} />
+      </div>
+
+      {/* Resultado por Loja + Gráfico Dia */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>🏪 Resultado por Loja</div>
+          <Table
+            headers={['Loja', 'Faturamento', 'Lucro Op', 'Gasto Ads', 'Lucro Líq', 'ROAS', 'Margem']}
+            rows={porLoja.map(l => [
+              <span style={{ color: LOJA_COLORS[l.loja], fontWeight: 700, fontSize: 11 }}>{l.loja}</span>,
+              <span style={{ fontFamily: 'monospace' }}>{R(l.rec)}</span>,
+              <span style={{ fontFamily: 'monospace' }}>{R(l.lucOp)}</span>,
+              <span style={{ fontFamily: 'monospace', color: '#e67e22' }}>{R(l.gads)}</span>,
+              <span style={{ fontFamily: 'monospace', color: l.ll >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(l.ll)}</span>,
+              <ROASBadge v={l.roas} />,
+              <StatusBadge v={l.rec > 0 ? l.ll / l.rec : 0} />,
+            ])}
+          />
+        </div>
+
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>📅 Faturamento por Dia</div>
+          {dayChart.length > 0
+            ? <MiniBar data={dayChart} height={130} />
+            : <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>
+          }
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Faturamento Bruto" value={formatCurrency(totalBruto)} icon={DollarSign} color="#EE2C00" subtitle={`Taxas Shopee: ${formatCurrency(totalTaxas)}`} />
-        <StatCard title="Receita Líquida" value={formatCurrency(totalLiquido)} icon={TrendingUp} color="#00d68f" subtitle={`Descontos: ${formatCurrency(totalDescontos)}`} />
-        <StatCard title="Lucro Líquido Real" value={formatCurrency(lucroLiquido)} icon={Target} color="#0095ff" subtitle={`Após Ads: -${formatCurrency(totalAds)}`} />
-        <StatCard title="Margem Líquida" value={`${margemLiquida.toFixed(1)}%`} icon={TrendingUp} color="#ffaa00" subtitle="Lucro / Faturamento bruto" />
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Total de Pedidos" value={totalPedidos.toString()} icon={ShoppingCart} color="#EE2C00" subtitle={`Ticket médio: ${formatCurrency(ticketMedio)}`} />
-        <StatCard title="Gasto com Ads" value={formatCurrency(totalAds)} icon={Store} color="#ff3d71" subtitle="Total investido" />
-        <StatCard title="ROAS Geral" value={`${roasGeral.toFixed(2)}x`} icon={TrendingUp} color="#ffaa00" subtitle="Líquido / Ads" />
-        <StatCard title="Alertas Estoque" value={alertasEstoque.length.toString()} icon={AlertTriangle} color="#ff3d71" subtitle="Abaixo do mínimo" />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="card lg:col-span-2">
-          <h2 className="font-semibold text-sm mb-4">Faturamento Bruto vs Líquido — Últimos 14 dias</h2>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="gBruto" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#EE2C00" stopOpacity={0.3} /><stop offset="95%" stopColor="#EE2C00" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gLiquido" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00d68f" stopOpacity={0.3} /><stop offset="95%" stopColor="#00d68f" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="label" stroke="#555570" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#555570" tick={{ fontSize: 11 }} tickFormatter={v => `R$${v}`} />
-              <Tooltip contentStyle={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 8 }}
-                formatter={(val: number, name: string) => [formatCurrency(val), name === 'bruto' ? 'Bruto' : 'Líquido']} />
-              <Area type="monotone" dataKey="bruto" stroke="#EE2C00" strokeWidth={2} fill="url(#gBruto)" />
-              <Area type="monotone" dataKey="liquido" stroke="#00d68f" strokeWidth={2} fill="url(#gLiquido)" />
-            </AreaChart>
-          </ResponsiveContainer>
+      {/* Top Produtos + Alertas Estoque */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>🏆 Top Produtos por Receita</div>
+          <Table
+            headers={['#', 'SKU', 'Produto', 'Qtd', 'Receita', 'Lucro', 'Margem']}
+            rows={topSkus.map((s: any, i: number) => [
+              <span style={{ color: '#555', fontFamily: 'monospace' }}>{i + 1}</span>,
+              <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{s.sku}</span>,
+              <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{s.nome}</span>,
+              N(s.qtd),
+              <span style={{ fontFamily: 'monospace' }}>{R(s.rec)}</span>,
+              <span style={{ fontFamily: 'monospace', color: s.lucro >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(s.lucro)}</span>,
+              <StatusBadge v={s.rec > 0 ? s.lucro / s.rec : 0} />,
+            ])}
+            emptyMsg="Sem dados de vendas"
+          />
         </div>
-        <div className="card">
-          <h2 className="font-semibold text-sm mb-4">Faturamento por Loja</h2>
-          <div className="space-y-4">
-            {faturamentoPorLoja.map((l, i) => {
-              const pct = totalBruto > 0 ? (l.total / totalBruto) * 100 : 0
+
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>⚠️ Alertas de Estoque</div>
+          {criticos.length === 0
+            ? <div style={{ color: '#22c55e', textAlign: 'center', padding: 32, fontSize: 13 }}>✅ Todos os produtos com estoque adequado</div>
+            : (
+              <Table
+                headers={['SKU', 'Produto', 'Atual', 'Mínimo', 'Status']}
+                rows={criticos.map(e => [
+                  <span style={{ fontFamily: 'monospace', color: '#ef4444', fontSize: 11 }}>{e.sku_base}</span>,
+                  e.produto,
+                  N(e.estoque_atual || 0),
+                  N(e.estoque_minimo || 0),
+                  e.estoque_atual <= 0
+                    ? <Badge color="#ef4444">SEM ESTOQUE</Badge>
+                    : <Badge color="#f59e0b">BAIXO</Badge>,
+                ])}
+              />
+            )
+          }
+
+          {/* Barras de estoque */}
+          <div style={{ marginTop: 14 }}>
+            {estoque.map(e => {
+              const cor = (e.estoque_atual || 0) <= 0 ? '#ef4444' : (e.estoque_atual || 0) < (e.estoque_minimo || 0) ? '#f59e0b' : '#22c55e'
+              const pct = (e.estoque_minimo || 0) > 0
+                ? Math.min((e.estoque_atual || 0) / ((e.estoque_minimo || 0) * 2), 1)
+                : (e.estoque_atual || 0) > 0 ? 1 : 0
               return (
-                <div key={l.loja}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span style={{ color: 'var(--text-secondary)' }}>{l.loja}</span>
-                    <span style={{ color: 'var(--text-primary)' }}>{pct.toFixed(1)}%</span>
+                <div key={e.id} style={{ marginBottom: 7 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
+                    <span style={{ color: '#888' }}>{e.produto}</span>
+                    <span style={{ fontFamily: 'monospace', color: cor, fontWeight: 700 }}>{N(e.estoque_atual || 0)} {e.unidade || 'un'}</span>
                   </div>
-                  <div className="h-2 rounded-full" style={{ background: 'var(--bg-hover)' }}>
-                    <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: LOJA_COLORS[i] }} />
-                  </div>
-                  <div className="flex justify-between text-xs mt-0.5">
-                    <span style={{ color: 'var(--text-muted)' }}>{formatCurrency(l.total)}</span>
-                    <span style={{ color: 'var(--success)' }}>líq: {formatCurrency(l.liquido)}</span>
+                  <div style={{ height: 4, background: '#1e1e2a', borderRadius: 2 }}>
+                    <div style={{ height: '100%', width: `${pct * 100}%`, background: cor, borderRadius: 2, transition: 'width .4s' }} />
                   </div>
                 </div>
               )
             })}
           </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-4 h-4" style={{ color: 'var(--warning)' }} />
-            <h2 className="font-semibold text-sm">Alertas de Estoque Baixo</h2>
-          </div>
-          {alertasEstoque.length === 0 ? (
-            <div className="text-center py-8"><Package className="w-10 h-10 mx-auto mb-2 opacity-20" />
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Estoque OK!</p></div>
-          ) : alertasEstoque.map(item => (
-            <div key={item.sku_base} className="flex items-center justify-between p-3 rounded-lg mb-2"
-              style={{ background: 'rgba(255,170,0,0.05)', border: '1px solid rgba(255,170,0,0.1)' }}>
-              <div><p className="text-sm font-medium">{item.produto}</p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>SKU: {item.sku_base}</p></div>
-              <div className="text-right"><span className="badge-warning">{item.estoque_atual} un</span>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Mín: {item.estoque_minimo}</p></div>
-            </div>
-          ))}
-        </div>
-        <div className="card">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp className="w-4 h-4" style={{ color: 'var(--shopee-primary)' }} />
-            <h2 className="font-semibold text-sm">Top Produtos</h2>
-          </div>
-          {topProdutos.length === 0 ? (
-            <div className="text-center py-8"><Package className="w-10 h-10 mx-auto mb-2 opacity-20" />
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sem dados</p></div>
-          ) : topProdutos.map((p, i) => (
-            <div key={p.sku} className="flex items-center justify-between p-3 rounded-lg mb-2"
-              style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: i === 0 ? '#EE2C00' : 'var(--border)', color: i === 0 ? 'white' : 'var(--text-muted)' }}>{i + 1}</span>
-                <div><p className="text-sm font-mono font-bold" style={{ color: 'var(--shopee-primary)' }}>{p.sku}</p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{p.qtd} un</p></div>
-              </div>
-              <p className="text-sm font-semibold">{formatCurrency(p.valor)}</p>
-            </div>
-          ))}
         </div>
       </div>
     </div>
