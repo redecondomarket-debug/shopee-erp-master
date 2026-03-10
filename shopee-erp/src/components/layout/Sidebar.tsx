@@ -5,12 +5,13 @@ import { supabase } from '@/lib/supabase'
 import {
   LayoutDashboard, Package, ShoppingCart, DollarSign,
   Megaphone, TrendingUp, ClipboardList, Download,
-  ShoppingBag, LogOut, ChevronRight, Bell
+  ShoppingBag, LogOut, ChevronRight, GitBranch
 } from 'lucide-react'
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/estoque', icon: Package, label: 'Estoque' },
+  { href: '/sku-map', icon: GitBranch, label: 'Composição SKUs' },
   { href: '/vendas', icon: ShoppingCart, label: 'Vendas' },
   { href: '/financeiro', icon: DollarSign, label: 'Financeiro' },
   { href: '/ads', icon: Megaphone, label: 'Shopee Ads' },
