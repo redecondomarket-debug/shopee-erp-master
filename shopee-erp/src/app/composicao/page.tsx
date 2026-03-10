@@ -67,7 +67,7 @@ export default function ComposicaoPage() {
     showToast('Removido!')
   }
 
-  const skusVenda = [...new Set(composicao.map(c => c.sku_venda))].sort()
+  const skusVenda = Array.from(new Set(composicao.map(c => c.sku_venda))).sort()
 
   // Agrupamento por produto base (igual ao TabComposicao do App.js)
   const porBase = useMemo(() => {
