@@ -1,97 +1,78 @@
 'use client'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
-import {
-  LayoutDashboard, Package, ShoppingCart, DollarSign,
-  Megaphone, TrendingUp, ClipboardList, Download,
-  ShoppingBag, LogOut, ChevronRight, GitBranch
-} from 'lucide-react'
+import { usePathname } from 'next/navigation'
 
-const navItems = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/estoque', icon: Package, label: 'Estoque' },
-  { href: '/sku-map', icon: GitBranch, label: 'Composição SKUs' },
-  { href: '/vendas', icon: ShoppingCart, label: 'Vendas' },
-  { href: '/financeiro', icon: DollarSign, label: 'Financeiro' },
-  { href: '/ads', icon: Megaphone, label: 'Shopee Ads' },
-  { href: '/curva-abc', icon: TrendingUp, label: 'Curva ABC' },
-  { href: '/compras', icon: ClipboardList, label: 'Ordem de Compra' },
-  { href: '/relatorios', icon: Download, label: 'Relatórios' },
+const TABS = [
+  { href: '/dashboard',        icon: '⚡', label: 'Dashboard'        },
+  { href: '/financeiro',       icon: '💰', label: 'Financeiro'       },
+  { href: '/dre',              icon: '📊', label: 'DRE Diário'       },
+  { href: '/estoque',          icon: '📦', label: 'Estoque'          },
+  { href: '/movimentacao',     icon: '🔄', label: 'Movimentação'     },
+  { href: '/ads',              icon: '📣', label: 'Shopee Ads'       },
+  { href: '/analise-produtos', icon: '🔍', label: 'Análise Produtos' },
+  { href: '/analise-ads',      icon: '📈', label: 'Análise Ads'      },
+  { href: '/composicao',       icon: '🧩', label: 'Composição'       },
+  { href: '/produtos-base',    icon: '🗂️', label: 'Produtos Base'    },
+  { href: '/ordem-compra',     icon: '🛒', label: 'Ordem de Compra'  },
 ]
-
-const lojas = ['KL Market', 'Universo dos Achados', 'Mundo dos Achados']
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-    router.push('/auth/login')
-  }
 
   return (
-    <aside className="fixed left-0 top-0 h-full w-60 flex flex-col z-40"
-           style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border)' }}>
-      {/* Logo */}
-      <div className="p-5 border-b" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-               style={{ background: 'linear-gradient(135deg, #EE2C00, #FF6535)' }}>
-            <ShoppingBag className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="font-bold text-sm leading-tight" style={{ fontFamily: 'var(--font-display)' }}>
-              Shopee ERP
-            </div>
-            <div className="text-xs" style={{ color: 'var(--shopee-primary)' }}>Master</div>
-          </div>
+    <aside style={{
+      width: 200,
+      background: '#0e0e17',
+      borderRight: '1px solid #2a2a3a',
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      position: 'sticky',
+      top: 0,
+      flexShrink: 0,
+    }}>
+      {/* LOGO */}
+      <div style={{
+        padding: '16px 16px 12px',
+        borderBottom: '1px solid #2a2a3a',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}>
+        <span style={{ fontSize: 24 }}>🛍️</span>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 13, letterSpacing: -0.5, color: '#ff6600' }}>SHOPEE GESTÃO</div>
+          <div style={{ fontSize: 9, color: '#444', letterSpacing: 1.5, textTransform: 'uppercase' }}>Estoque Único · 3 Lojas</div>
         </div>
       </div>
 
-      {/* Lojas */}
-      <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
-        <p className="text-xs font-semibold mb-2 uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          Lojas
-        </p>
-        {lojas.map(loja => (
-          <div key={loja} className="flex items-center gap-2 py-1">
-            <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--success)' }} />
-            <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{loja}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-        {navItems.map(({ href, icon: Icon, label }) => {
-          const active = pathname === href || pathname.startsWith(href + '/')
+      {/* NAV */}
+      <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto' }}>
+        {TABS.map(t => {
+          const active = pathname === t.href || (t.href !== '/dashboard' && pathname.startsWith(t.href))
           return (
-            <Link key={href} href={href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group"
-              style={{
-                background: active ? 'rgba(238,44,0,0.12)' : 'transparent',
-                color: active ? 'var(--shopee-primary)' : 'var(--text-secondary)',
-              }}>
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              <span className="text-sm font-medium flex-1">{label}</span>
-              {active && <ChevronRight className="w-3 h-3 opacity-60" />}
+            <Link key={t.href} href={t.href} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '9px 16px',
+              color: active ? '#ff6600' : '#666',
+              fontWeight: active ? 700 : 400,
+              fontSize: 13,
+              textDecoration: 'none',
+              background: active ? '#ff660015' : 'transparent',
+              borderLeft: active ? '3px solid #ff6600' : '3px solid transparent',
+              transition: 'all .15s',
+            }}>
+              <span style={{ fontSize: 15 }}>{t.icon}</span>
+              <span>{t.label}</span>
             </Link>
           )
         })}
       </nav>
 
-      {/* Logout */}
-      <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
-        <button onClick={handleLogout}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg w-full transition-all"
-          style={{ color: 'var(--text-secondary)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,61,113,0.1)'; (e.currentTarget as HTMLElement).style.color = 'var(--danger)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}>
-          <LogOut className="w-4 h-4" />
-          <span className="text-sm font-medium">Sair</span>
-        </button>
+      <div style={{ padding: '12px 16px', borderTop: '1px solid #2a2a3a', fontSize: 10, color: '#333', letterSpacing: 0.5 }}>
+        SHOPEE ERP MASTER v2.0
       </div>
     </aside>
   )
