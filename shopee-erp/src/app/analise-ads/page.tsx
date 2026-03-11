@@ -16,11 +16,11 @@ const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', cur
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
 
 const S: Record<string, React.CSSProperties> = {
-  card:  { background: '#16161f', border: '1px solid #2a2a3a', borderRadius: 10, padding: 16 },
-  th:    { padding: '8px 12px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#888', letterSpacing: 0.8, textTransform: 'uppercase' as any, borderBottom: '1px solid #2a2a3a', whiteSpace: 'nowrap' as any },
-  td:    { padding: '7px 12px', fontSize: 12.5, borderBottom: '1px solid #1e1e2a', whiteSpace: 'nowrap' as any },
-  inp:   { background: '#0f0f13', border: '1px solid #2a2a3a', borderRadius: 6, padding: '5px 8px', color: '#e8e8f0', fontSize: 12, outline: 'none' },
-  btnSm: { background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 11 },
+  card:  { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:    { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:    { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:   { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
+  btnSm: { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
 }
 
 function Badge({ children, color = '#ff6600' }: { children: React.ReactNode; color?: string }) {
@@ -119,15 +119,15 @@ export default function AnaliseAdsPage() {
   const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240 }}>
-      <div style={{ width: 40, height: 40, border: '3px solid #ff660033', borderTop: '3px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+      <div style={{ width: 36, height: 36, border: '2px solid #1e1e2c', borderTop: '2px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
     </div>
   )
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>📈 Análise de Anúncios — ROAS e Eficiência por Loja</h2>
+        <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📈 Análise de Anúncios — ROAS e Eficiência por Loja</h2>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
           <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
@@ -137,7 +137,7 @@ export default function AnaliseAdsPage() {
       </div>
 
       {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={lojaFiltro} onChange={e => setLojaFiltro(e.target.value)} style={{ ...S.inp, width: 'auto', fontSize: 12 } as any}>
           <option>Todas</option>{LOJAS.map(l => <option key={l}>{l}</option>)}
         </select>
@@ -157,7 +157,7 @@ export default function AnaliseAdsPage() {
         <KPI icon="✅" label="Lucro Líquido"  value={R(totLL)}   color={totLL >= 0 ? '#22c55e' : '#ef4444'} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         {/* TABELA POR LOJA */}
         <div style={S.card}>
           <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>🏪 Por Loja</div>
