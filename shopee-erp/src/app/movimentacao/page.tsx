@@ -260,7 +260,7 @@ export default function MovimentacaoPage() {
                   <div key={key}>
                     <div style={{ ...S.tableRow, background: aberto ? 'rgba(255,255,255,0.04)' : 'transparent' }}
                       onClick={() => setExpandido(prev => ({ ...prev, [key]: !prev[key] }))}>
-                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{m.data?.slice(5)}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{m.data ? m.data.slice(8,10) + '/' + m.data.slice(5,7) + '/' + m.data.slice(0,4) : ''}</span>
                       <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--shopee-primary)', fontFamily: 'monospace' }}>{m.sku_venda}</span>
                       <span style={S.badge(corLoja)}>{m.loja?.split(' ')[0]}</span>
                       <span style={{ textAlign: 'center', fontSize: 13, fontWeight: 600 }}>{m.quantidade}</span>
