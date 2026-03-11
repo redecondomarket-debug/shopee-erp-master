@@ -82,8 +82,13 @@ export default function DREPage() {
         ? finF.filter(f => f.data === data)
         : finF.filter(f => f.data === data && f.loja === loja)
 
-      const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-      const taxas = rec * TAXA_SHOPEE + lp.length * TAXA_FIXA
+      const rec   = lp.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+      const taxas = lp.reduce((s, f) => {
+        const rb = f.receita_bruta || f.valor_bruto || 0
+        const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
+        const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
+        return s + ts + tf
+      }, 0)
       const cprod = lp.reduce((s, f) => s + (f.custo_produto || 0), 0)
       const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
       const imp   = rec * imposto
@@ -101,8 +106,13 @@ export default function DREPage() {
       // Por loja (para modo resumido expandido)
       const porLoja = LOJAS.map(l => {
         const lf    = finF.filter(f => f.data === data && f.loja === l)
-        const r2    = lf.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-        const t2    = r2 * TAXA_SHOPEE + lf.length * TAXA_FIXA
+        const r2    = lf.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+        const t2    = lf.reduce((s, f) => {
+          const rb = f.receita_bruta || f.valor_bruto || 0
+          const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
+          const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
+          return s + ts + tf
+        }, 0)
         const i2    = r2 * imposto
         const cp2   = lf.reduce((s, f) => s + (f.custo_produto || 0), 0)
         const ce2   = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
