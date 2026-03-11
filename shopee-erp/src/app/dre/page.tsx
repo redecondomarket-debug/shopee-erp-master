@@ -94,25 +94,31 @@ export default function DREPage() {
       const ll     = lucOp - gads
       const peds   = new Set(lp.map(f => f.numero_pedido)).size
 
+      const mc     = rec - taxas - cprod - cemb   // MC = Receita - Custos Variáveis (sem imposto e ads)
+      const mcPct  = rec > 0 ? mc / rec : 0
+
       // Por loja (para modo resumido expandido)
       const porLoja = LOJAS.map(l => {
         const lf    = finF.filter(f => f.data === data && f.loja === l)
         const r2    = lf.reduce((s, f) => s + (f.valor_bruto || 0), 0)
         const t2    = r2 * TAXA_SHOPEE + lf.length * TAXA_FIXA
         const i2    = r2 * imposto
-        const lo2   = r2 - t2 - i2
+        const cp2   = lf.reduce((s, f) => s + (f.custo_produto || 0), 0)
+        const ce2   = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+        const mc2   = r2 - t2 - cp2 - ce2
+        const lo2   = mc2 - i2
         const g2    = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
-        return { loja: l, rec: r2, taxas: t2, imp: i2, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.numero_pedido)).size }
+        return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.numero_pedido)).size }
       })
 
-      return { data, loja, rec, taxas, cprod, cemb, imp, lucOp, gads, ll, peds, margem: rec > 0 ? ll / rec : 0, porLoja }
+      return { data, loja, rec, taxas, cprod, cemb, imp, mc, mcPct, lucOp, gads, ll, peds, margem: rec > 0 ? ll / rec : 0, porLoja }
     })
   }, [finF, adsF, imposto, modo])
 
   const tot = useMemo(() => {
-    const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
+    const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
     rows.forEach(r => Object.keys(t).forEach(k => (t as any)[k] += (r as any)[k] || 0))
-    return t
+    return { ...t, mcPct: t.rec > 0 ? t.mc / t.rec : 0 }
   }, [rows])
 
   if (loading) return (
@@ -160,12 +166,13 @@ export default function DREPage() {
       {/* KPIs */}
       <div style={{ ...S.card, marginBottom: 16, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '12px 16px' }}>
         {[
-          ['Receita Total',      R(tot.rec),   '#ff9933'],
-          ['Lucro Líquido Real', R(tot.ll),    tot.ll >= 0 ? '#22c55e' : '#ef4444'],
-          ['Taxas Shopee',       R(tot.taxas), '#f59e0b'],
-          ['Custo Produtos',     R(tot.cprod), '#888'],
-          ['Impostos',           R(tot.imp),   '#666'],
-          ['Gasto Ads Total',    R(tot.gads),  '#e67e22'],
+          ['Receita Total',          R(tot.rec),                                       '#ff9933'],
+          ['Margem de Contribuição', `${R(tot.mc)} (${P(tot.mcPct)})`,                 tot.mcPct >= 0.30 ? '#22c55e' : tot.mcPct >= 0.15 ? '#f59e0b' : '#ef4444'],
+          ['Lucro Líquido Real',     R(tot.ll),                                        tot.ll >= 0 ? '#22c55e' : '#ef4444'],
+          ['Taxas Shopee',           R(tot.taxas),                                     '#f59e0b'],
+          ['Custo Produtos',         R(tot.cprod),                                     '#888'],
+          ['Impostos',               R(tot.imp),                                       '#666'],
+          ['Gasto Ads Total',        R(tot.gads),                                      '#e67e22'],
         ].map(([l, v, c]) => (
           <div key={l as string}>
             <div style={{ fontSize: 10, color: '#555', textTransform: 'uppercase', letterSpacing: 0.8 }}>{l}</div>
@@ -180,7 +187,7 @@ export default function DREPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['Data', ...(modo === 'porLoja' ? ['Loja'] : []), 'Pedidos', 'Receita Bruta', 'Taxas Shopee', 'Custo Prod', 'Custo Emb', 'Impostos', 'Lucro Op', 'Gasto Ads', 'Lucro Líq Real', 'Margem Líq'].map(h => (
+                {['Data', ...(modo === 'porLoja' ? ['Loja'] : []), 'Pedidos', 'Receita Bruta', 'Taxas Shopee', 'Custo Prod', 'Custo Emb', 'Mg Contribuição', 'Mg Contrib %', 'Impostos', 'Lucro Op', 'Gasto Ads', 'Lucro Líq Real', 'Margem Líq'].map(h => (
                   <th key={h} style={S.th as any}>{h}</th>
                 ))}
               </tr>
@@ -204,6 +211,8 @@ export default function DREPage() {
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(r.taxas)}</span></td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace' }}>{R(r.cprod)}</span></td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace' }}>{R(r.cemb)}</span></td>
+                    <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontWeight: 700, color: r.mc >= 0 ? '#a78bfa' : '#ef4444' }}>{R(r.mc)}</span></td>
+                    <td style={S.td as any}><span style={{ background: r.mcPct >= 0.30 ? '#22c55e22' : r.mcPct >= 0.15 ? '#f59e0b22' : '#ef444422', color: r.mcPct >= 0.30 ? '#22c55e' : r.mcPct >= 0.15 ? '#f59e0b' : '#ef4444', border: `1px solid ${r.mcPct >= 0.30 ? '#22c55e44' : r.mcPct >= 0.15 ? '#f59e0b44' : '#ef444444'}`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>{P(r.mcPct)}</span></td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace' }}>{R(r.imp)}</span></td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace', color: r.lucOp >= 0 ? '#22c55e' : '#ef4444' }}>{R(r.lucOp)}</span></td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace', color: '#e67e22' }}>{R(r.gads)}</span></td>
@@ -222,6 +231,8 @@ export default function DREPage() {
                       <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{R(l.taxas)}</span></td>
                       <td style={S.td as any}>—</td>
                       <td style={S.td as any}>—</td>
+                      <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: l.mc >= 0 ? '#a78bfa' : '#ef4444' }}>{R(l.mc)}</span></td>
+                      <td style={S.td as any}><span style={{ background: l.mcPct >= 0.30 ? '#22c55e22' : l.mcPct >= 0.15 ? '#f59e0b22' : '#ef444422', color: l.mcPct >= 0.30 ? '#22c55e' : l.mcPct >= 0.15 ? '#f59e0b' : '#ef4444', border: `1px solid ${l.mcPct >= 0.30 ? '#22c55e44' : l.mcPct >= 0.15 ? '#f59e0b44' : '#ef444444'}`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>{P(l.mcPct)}</span></td>
                       <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11 }}>{R(l.imp)}</span></td>
                       <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11, color: l.lucOp >= 0 ? '#22c55e' : '#ef4444' }}>{R(l.lucOp)}</span></td>
                       <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11, color: '#e67e22' }}>{R(l.gads)}</span></td>
@@ -241,6 +252,8 @@ export default function DREPage() {
                 <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800, color: '#f59e0b' }}>{R(tot.taxas)}</td>
                 <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800 }}>{R(tot.cprod)}</td>
                 <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800 }}>{R(tot.cemb)}</td>
+                <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800, color: '#a78bfa' }}>{R(tot.mc)}</td>
+                <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800, color: tot.mcPct >= 0.30 ? '#22c55e' : tot.mcPct >= 0.15 ? '#f59e0b' : '#ef4444' }}>{P(tot.mcPct)}</td>
                 <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800 }}>{R(tot.imp)}</td>
                 <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800, color: tot.lucOp >= 0 ? '#22c55e' : '#ef4444' }}>{R(tot.lucOp)}</td>
                 <td style={{ ...S.td as any, fontFamily: 'monospace', fontWeight: 800, color: '#e67e22' }}>{R(tot.gads)}</td>
