@@ -65,11 +65,11 @@ function Toast({ msg, type, onClose }: { msg: string; type: string; onClose: () 
 }
 
 // ─── CÁLCULO (idêntico ao App.js calcPed) ────────────────────────────────────
-function calcLinha(recBruta: number, custoProd: number, custoEmb: number, imposto: number) {
+function calcLinha(recBruta: number, custoProd: number, imposto: number) {
   const taxaShopee = recBruta * TAXA_SHOPEE
   const taxaFixa   = TAXA_FIXA
   const imp        = recBruta * imposto
-  const custoTotal = taxaShopee + taxaFixa + custoProd + custoEmb + imp
+  const custoTotal = taxaShopee + taxaFixa + custoProd + imp
   const lucroOp    = recBruta - custoTotal
   const margem     = recBruta > 0 ? lucroOp / recBruta : 0
   return { taxaShopee, taxaFixa, imp, custoTotal, lucroOp, margem }
@@ -136,24 +136,24 @@ function parseShopeeRow(row: Record<string, any>): any | null {
   const loja = LOJAS.find(l => lojaRaw.includes(l.split(' ')[0].toUpperCase())) || lojaRaw || LOJAS[0]
 
   return {
-    numero_pedido:   numPedido,
+    pedido:          numPedido,
     status,
     data,
     loja,
-    sku_vendido:     skuVenda  || skuPrinc,
-    sku_principal:   skuPrinc,
-    nome_produto:    nomeProd,
+    sku:             skuVenda || skuPrinc,
+    
+    produto:         nomeProd,
     quantidade,
-    preco_unitario:  precoUnitario,
-    preco_original:  precoOriginal,
-    receita_bruta:   valorBruto,         // Agreed Price × Qtd
+    _preco_unitario:  precoUnitario,
+    _preco_original:  precoOriginal,
+    valor_bruto:     valorBruto,
     taxa_shopee:     comissaoShopee,     // Shopee Commission (real)
-    taxa_fixa:       taxaShopee,         // Shopee Fee (real)
+    taxas_shopee:    taxaShopee,
     valor_liquido:   valorLiquido,       // Final Amount Received (real)
-    custo_produto:   0,
-    custo_embalagem: 0,
-    imposto:         0,
-    lucro_operacional: 0,
+    
+    
+    
+    
   }
 }
 
@@ -169,15 +169,14 @@ export default function FinanceiroPage() {
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
-  const [custoEmb,   setCustoEmb]   = useState(0)
   const [showCfg,    setShowCfg]    = useState(false)
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
-    data: '', loja: LOJAS[0], numero_pedido: '', sku: '', nome_produto: '',
-    quantidade: 1, preco_unitario: '', valor_bruto: '', custo_produto: 0, custo_embalagem: 0
+    data: '', loja: LOJAS[0], pedido: '', sku: '', produto: '',
+    quantidade: 1, preco_unitario: '', valor_bruto: ''
   })
 
   useEffect(() => { loadData() }, [])
@@ -196,7 +195,6 @@ export default function FinanceiroPage() {
   }
 
   // ── Calcula custo do produto cruzando sku_map + estoque ──────────────────
-  // custo_embalagem é FIXO por venda (não multiplica pela qtd de componentes)
   function calcCustoProduto(skuVendido: string, quantidade: number): number {
     if (!skuVendido) return 0
     const componentes = skuMap.filter(m => m.sku_venda === skuVendido)
@@ -212,9 +210,8 @@ export default function FinanceiroPage() {
     // Custo embalagem = fixo por venda (pega do primeiro componente, não multiplica)
     const primeiroComp = componentes[0]
     const prodPrincipal = estoque.find(e => e.sku_base === primeiroComp?.sku_base)
-    const custoEmb = prodPrincipal?.custo_embalagem || 0
 
-    return custoProd + custoEmb
+    return custoProd
   }
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
@@ -237,22 +234,24 @@ export default function FinanceiroPage() {
     if (!parsed.length) { showToast('Nenhum pedido válido encontrado. Verifique o arquivo e os status.', 'err'); return }
 
     setSaving(true)
-    // Calcula lucro operacional com imposto configurado antes de salvar
-    const comUpsert = parsed.map(p => {
-      const imp        = p.receita_bruta * imposto
-      const embCusto   = custoEmb || 0
-      const lucroOp    = p.receita_bruta - p.taxa_shopee - p.taxa_fixa - p.custo_produto - embCusto - imp
-      return {
-        ...p,
-        custo_embalagem:   embCusto,
-        imposto:           imp,
-        lucro_operacional: lucroOp,
-      }
-    })
+    const comUpsert = parsed.map(p => ({
+      pedido:          p.pedido,
+      data:            p.data,
+      loja:            p.loja,
+      sku:             p.sku,
+      produto:         p.produto,
+      quantidade:      p.quantidade,
+      valor_bruto:     p.valor_bruto,
+      desconto:        p.desconto || 0,
+      frete:           p.frete || 0,
+      comissao_shopee: p.comissao_shopee || 0,
+      taxas_shopee:    p.taxas_shopee || 0,
+      valor_liquido:   p.valor_liquido || 0,
+    }))
 
     const { error } = await supabase.from('financeiro').upsert(
       comUpsert,
-      { onConflict: 'numero_pedido,sku_vendido' }
+      { onConflict: 'pedido,sku' }
     )
     setSaving(false)
     if (error) { showToast('Erro ao salvar: ' + error.message, 'err'); return }
@@ -263,23 +262,30 @@ export default function FinanceiroPage() {
 
   // Adicionar manual
   async function addManual() {
-    if (!form.data || !form.numero_pedido || !form.sku || !form.valor_bruto) {
+    if (!form.data || !form.pedido || !form.sku || !form.valor_bruto) {
       showToast('Preencha data, pedido, SKU e valor', 'err'); return
     }
     const recBruta = +form.valor_bruto
-    const calc = calcLinha(recBruta, +form.custo_produto, +form.custo_embalagem, imposto)
+    const calc = calcLinha(recBruta, 0, imposto)
     setSaving(true)
     const { error } = await supabase.from('financeiro').insert({
-      ...form,
-      quantidade: +form.quantidade,
-      preco_unitario: +form.preco_unitario || recBruta,
-      valor_bruto: recBruta,
-      valor_liquido: calc.lucroOp,
+      pedido:          form.pedido,
+      data:            form.data,
+      loja:            form.loja,
+      sku:             form.sku,
+      produto:         form.produto,
+      quantidade:      +form.quantidade,
+      valor_bruto:     recBruta,
+      desconto:        0,
+      frete:           0,
+      comissao_shopee: 0,
+      taxas_shopee:    0,
+      valor_liquido:   recBruta,
     })
     setSaving(false)
     if (error) { showToast('Erro: ' + error.message, 'err'); return }
     showToast('Pedido adicionado!')
-    setForm(f => ({ ...f, numero_pedido: '', sku: '', nome_produto: '', quantidade: 1, preco_unitario: '', valor_bruto: '' }))
+    setForm(f => ({ ...f, pedido: '', sku: '', produto: '', quantidade: 1, preco_unitario: '', valor_bruto: '' }))
     loadData()
   }
 
@@ -307,24 +313,24 @@ export default function FinanceiroPage() {
     if (dateTo   && r.data > dateTo)   return false
     return true
   }).map(r => {
-    const recBruta = r.receita_bruta || r.valor_bruto || 0
+    const recBruta = r.valor_bruto || r.valor_bruto || 0
     const taxaShopee = (r.taxa_shopee && r.taxa_shopee > 0)
       ? r.taxa_shopee
       : recBruta * TAXA_SHOPEE
-    const taxaFixa   = (r.taxa_fixa && r.taxa_fixa > 0)
-      ? r.taxa_fixa
+    const taxaFixa   = (r.taxas_shopee && r.taxas_shopee > 0)
+      ? r.taxas_shopee
       : TAXA_FIXA
     // Custo produto: usa banco se preenchido, senão calcula via sku_map + estoque
-    const skuVenda = r.sku_vendido || r.sku || ''
+    const skuVenda = r.sku || ''
     const custoProdCalc = calcCustoProduto(skuVenda, r.quantidade || 1)
-    const cProd      = (r.custo_produto && r.custo_produto > 0) ? r.custo_produto : custoProdCalc
-    const cEmb       = (r.custo_embalagem || 0) + (custoEmb || 0)
+    const cProd      = (0 && 0 > 0) ? 0 : custoProdCalc
+    const cEmb       = 0
     const imp        = recBruta * imposto
     const custoTotal = taxaShopee + taxaFixa + cProd + cEmb + imp
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
     return { ...r, recBruta, taxaShopee, taxaFixa, custoProd: cProd, imp, custoTotal, lucroOp, margem }
-  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto, custoEmb])
+  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
   const totLuc  = filtered.reduce((s, r) => s + r.lucroOp,  0)
@@ -345,7 +351,7 @@ export default function FinanceiroPage() {
         <div style={{ flex: 1 }} />
         <button onClick={() => setShowCfg(!showCfg)} style={S.btnSm as any}>⚙️ Configurar</button>
         <button onClick={() => {
-          const cols = ['data','loja','numero_pedido','sku_vendido','nome_produto','quantidade','preco_unitario','receita_bruta','taxa_shopee','taxa_fixa','custo_produto','custo_embalagem','imposto','lucro_operacional']
+          const cols = ['data','loja','pedido','sku','produto','quantidade','valor_bruto','comissao_shopee','taxas_shopee','valor_liquido']
           const header = cols.join(';')
           const rows = filtered.map((p: any) => cols.map((c: string) => `"${(p as any)[c] ?? ''}"`).join(';'))
           const csv = [header, ...rows].join('\n')
@@ -373,7 +379,7 @@ export default function FinanceiroPage() {
             </div>
             <div>
               <label style={S.label}>Custo Embalagem Adicional (R$/pedido)</label>
-              <input type="number" value={custoEmb} onChange={e => setCustoEmb(+e.target.value)}
+              <input type="number" value={0} disabled
                 style={{ ...S.inp, width: 120 } as any} step="0.01" min="0" />
             </div>
             <div style={{ fontSize: 11, color: '#555', padding: '8px 12px', background: '#13131e', borderRadius: 6 }}>
@@ -390,10 +396,10 @@ export default function FinanceiroPage() {
           <div style={{ fontSize: 11, color: '#888', marginBottom: 10, fontWeight: 600 }}>+ ADICIONAR PEDIDO MANUALMENTE</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10 }}>
             {([
-              ['Data', 'date', 'data'], ['Nº Pedido', 'text', 'numero_pedido'],
-              ['SKU', 'text', 'sku'], ['Produto', 'text', 'nome_produto'],
+              ['Data', 'date', 'data'], ['Nº Pedido', 'text', 'pedido'],
+              ['SKU', 'text', 'sku'], ['Produto', 'text', 'produto'],
               ['Qtd', 'number', 'quantidade'], ['Valor Unit R$', 'number', 'preco_unitario'],
-              ['Valor Bruto R$', 'number', 'valor_bruto'], ['Custo Prod R$', 'number', 'custo_produto'],
+              ['Valor Bruto R$', 'number', 'valor_bruto'], ['Comissão Shopee R$', 'number', 'comissao_shopee'],
             ] as [string, string, string][]).map(([lbl, type, field]) => (
               <div key={field}>
                 <label style={S.label}>{lbl}</label>
@@ -451,11 +457,11 @@ export default function FinanceiroPage() {
           rows={filtered.map(p => [
             D(p.data),
             <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
-            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.numero_pedido}</span>,
-            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku_vendido || p.sku}</span>,
-            <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{p.nome_produto}</span>,
+            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.pedido}</span>,
+            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku || p.sku}</span>,
+            <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{p.produto}</span>,
             N(p.quantidade),
-            R(p.preco_unitario || 0),
+            R(p._preco_unitario || 0),
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.recBruta)}</span>,
             <span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(p.taxaShopee)}</span>,
             <span style={{ fontFamily: 'monospace' }}>{R(p.taxaFixa)}</span>,
