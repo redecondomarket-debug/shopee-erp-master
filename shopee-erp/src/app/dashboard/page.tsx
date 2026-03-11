@@ -115,10 +115,12 @@ export default function DashboardPage() {
     if (!skuVendido) return 0
     const comps = skuMap.filter(m => m.sku_venda === skuVendido)
     if (!comps.length) return 0
-    return comps.reduce((t, c) => {
+    const custoProd = comps.reduce((t, c) => {
       const prod = estoque.find(e => e.sku_base === c.sku_base)
-      return t + ((prod?.custo || 0) + (prod?.custo_embalagem || 0)) * (c.quantidade || 1) * quantidade
+      return t + (prod?.custo || 0) * (c.quantidade || 1) * quantidade
     }, 0)
+    const prodPrincipal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
+    return custoProd + (prodPrincipal?.custo_embalagem || 0)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
