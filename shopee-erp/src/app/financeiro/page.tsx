@@ -270,18 +270,22 @@ export default function FinanceiroPage() {
     loadData()
   }
 
-  // Filtrar + calcular usando taxas REAIS do banco (não recalcular)
+  // Filtrar + calcular: usa taxas reais do banco quando disponíveis, recalcula como fallback
   const filtered = useMemo(() => rows.filter(r => {
     if (filterLoja !== 'Todas' && r.loja !== filterLoja) return false
     if (dateFrom && r.data < dateFrom) return false
     if (dateTo   && r.data > dateTo)   return false
     return true
   }).map(r => {
-    // CORREÇÃO 3: usar taxas reais salvas no banco, não recalcular
-    const recBruta   = r.receita_bruta  || r.valor_bruto  || 0
-    const taxaShopee = r.taxa_shopee    || 0   // Shopee Commission (real da planilha)
-    const taxaFixa   = r.taxa_fixa      || 0   // Shopee Fee (real da planilha)
-    const cProd      = r.custo_produto  || 0
+    const recBruta = r.receita_bruta || r.valor_bruto || 0
+    // Usa taxas reais do banco; se zeradas (dados antigos), recalcula pelos percentuais padrão
+    const taxaShopee = (r.taxa_shopee && r.taxa_shopee > 0)
+      ? r.taxa_shopee
+      : recBruta * TAXA_SHOPEE
+    const taxaFixa   = (r.taxa_fixa && r.taxa_fixa > 0)
+      ? r.taxa_fixa
+      : TAXA_FIXA
+    const cProd      = r.custo_produto    || 0
     const cEmb       = (r.custo_embalagem || 0) + (custoEmb || 0)
     const imp        = recBruta * imposto
     const custoTotal = taxaShopee + taxaFixa + cProd + cEmb + imp
