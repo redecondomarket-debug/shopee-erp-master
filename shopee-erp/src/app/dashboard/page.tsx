@@ -88,6 +88,7 @@ export default function DashboardPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
   const [estoque,    setEstoque]    = useState<any[]>([])
+  const [skuMap,     setSkuMap]     = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
@@ -97,15 +98,27 @@ export default function DashboardPage() {
 
   async function loadData() {
     setLoading(true)
-    const [finRes, adsRes, estRes] = await Promise.all([
+    const [finRes, adsRes, estRes, mapRes] = await Promise.all([
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('ads').select('*').order('data', { ascending: false }),
       supabase.from('estoque').select('*'),
+      supabase.from('sku_map').select('*'),
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
     setEstoque(estRes.data || [])
+    setSkuMap(mapRes.data || [])
     setLoading(false)
+  }
+
+  function calcCustoProd(skuVendido: string, quantidade: number): number {
+    if (!skuVendido) return 0
+    const comps = skuMap.filter(m => m.sku_venda === skuVendido)
+    if (!comps.length) return 0
+    return comps.reduce((t, c) => {
+      const prod = estoque.find(e => e.sku_base === c.sku_base)
+      return t + ((prod?.custo || 0) + (prod?.custo_embalagem || 0)) * (c.quantidade || 1) * quantidade
+    }, 0)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
@@ -130,7 +143,11 @@ export default function DashboardPage() {
     const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
     return s + ts + tf
   }, 0)
-  const totalCprod = finF.reduce((s, f) => s + (f.custo_produto || 0), 0)
+  const totalCprod = finF.reduce((s, f) => {
+    const sku = f.sku_vendido || f.sku || ''
+    const calc = calcCustoProd(sku, f.quantidade || 1)
+    return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
+  }, 0)
   const totalCemb  = finF.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
   const totalMC    = totalRec - totalTaxas - totalCprod - totalCemb
   const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
@@ -152,7 +169,11 @@ export default function DashboardPage() {
       const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
       return s + ts + tf
     }, 0)
-    const cprod = lp.reduce((s, f) => s + (f.custo_produto || 0), 0)
+    const cprod = lp.reduce((s, f) => {
+      const sku = f.sku_vendido || f.sku || ''
+      const calc = calcCustoProd(sku, f.quantidade || 1)
+      return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
+    }, 0)
     const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
     const mc    = rec - taxas - cprod - cemb
     const lucOp = lp.reduce((s, f) => s + (f.lucro_operacional || f.valor_liquido || 0), 0)
