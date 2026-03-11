@@ -164,7 +164,7 @@ export default function RelatoriosPage() {
   }
 
   const S = {
-    page: { padding: '24px', minHeight: '100vh' },
+    page: { padding: '20px 24px', width: '100%', boxSizing: 'border-box' as const },
     title: { fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px' },
     sub: { fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 24px' },
     filtersRow: { display: 'flex', gap: 10, flexWrap: 'wrap' as const, alignItems: 'center', marginBottom: 28, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 18px' },
