@@ -13,6 +13,7 @@ const TAXA_SHOPEE = 0.20
 const TAXA_FIXA   = 4.05
 const DEFAULT_IMPOSTO = 0.06
 
+const D = (s: string) => { if (!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m && y ? `${d}/${m}/${y}` : s }
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
 const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
@@ -200,7 +201,7 @@ export default function DREPage() {
                     style={{ cursor: modo === 'resumido' ? 'pointer' : 'default', borderBottom: '1px solid #1e1e2a' }}
                   >
                     <td style={S.td as any}>
-                      <span style={{ fontFamily: 'monospace' }}>{r.data}</span>
+                      <span style={{ fontFamily: 'monospace' }}>{D(r.data)}</span>
                       {modo === 'resumido' && <span style={{ marginLeft: 6, fontSize: 10, color: '#555' }}>{expanded === r.data ? '▲' : '▼'}</span>}
                     </td>
                     {modo === 'porLoja' && (
