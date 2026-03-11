@@ -123,11 +123,16 @@ export default function DashboardPage() {
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
   // ── KPIs (lógica idêntica ao App.js) ──────────────────────────────────────
-  const totalRec   = finF.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto  || 0), 0)
-  const totalTaxas = finF.reduce((s, f) => s + (f.taxa_shopee   || 0) + (f.taxa_fixa || 0), 0)
+  const totalRec   = finF.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+  const totalTaxas = finF.reduce((s, f) => {
+    const rb = f.receita_bruta || f.valor_bruto || 0
+    const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
+    const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
+    return s + ts + tf
+  }, 0)
   const totalCprod = finF.reduce((s, f) => s + (f.custo_produto || 0), 0)
   const totalCemb  = finF.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
-  const totalMC    = totalRec - totalTaxas - totalCprod - totalCemb   // MC = Rec - Custos Variáveis
+  const totalMC    = totalRec - totalTaxas - totalCprod - totalCemb
   const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
   const totalLucOp = finF.reduce((s, f) => s + (f.lucro_operacional || f.valor_liquido || 0), 0)
   const totalAds   = adsF.reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
@@ -141,7 +146,12 @@ export default function DashboardPage() {
   const porLoja = LOJAS.map(loja => {
     const lp    = finF.filter(f => f.loja === loja)
     const rec   = lp.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
-    const taxas = lp.reduce((s, f) => s + (f.taxa_shopee || 0) + (f.taxa_fixa || 0), 0)
+    const taxas = lp.reduce((s, f) => {
+      const rb = f.receita_bruta || f.valor_bruto || 0
+      const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
+      const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
+      return s + ts + tf
+    }, 0)
     const cprod = lp.reduce((s, f) => s + (f.custo_produto || 0), 0)
     const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
     const mc    = rec - taxas - cprod - cemb
