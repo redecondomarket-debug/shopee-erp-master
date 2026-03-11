@@ -110,7 +110,7 @@ export default function OrdemCompraPage() {
   )
 
   return (
-    <div style={{ padding: "24px 28px", maxWidth: 1400, margin: "0 auto", width: "100%" }}>
+    <div style={{ padding: "20px 24px", width: "100%", boxSizing: "border-box" }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>🛒 Ordem de Compra — Rateio de Reposição por Loja</h2>
 
       {/* FILTRO DE PERÍODO */}
@@ -162,7 +162,7 @@ export default function OrdemCompraPage() {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%' }}>
               {/* VENDAS POR LOJA */}
               <div>
                 <div style={{ fontSize: 11, color: '#888', fontWeight: 700, textTransform: 'uppercase', letterSpacing: .8, marginBottom: 8 }}>📊 Vendas no período</div>
