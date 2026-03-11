@@ -17,6 +17,7 @@ const DEFAULT_IMPOSTO = 0.06
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 const R  = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P  = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
+const D  = (s: string) => { if (!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m && y ? `${d}/${m}/${y}` : s }
 const N  = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
 
 // ─── UI ATOMS ─────────────────────────────────────────────────────────────────
@@ -412,7 +413,7 @@ export default function FinanceiroPage() {
         <Table
           headers={['Data', 'Loja', 'Pedido', 'SKU', 'Produto', 'Qtd', 'Vl Unit', 'Rec Bruta', 'Taxa Shop', 'Taxa Fixa', 'Custo Prod', 'Imposto', 'Custo Total', 'Lucro Op', 'Margem', '']}
           rows={filtered.map(p => [
-            p.data,
+            D(p.data),
             <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
             <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.numero_pedido}</span>,
             <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku_vendido || p.sku}</span>,
