@@ -14,6 +14,7 @@ const DEFAULT_IMPOSTO = 0.06
 
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
+const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
 
 const S: Record<string, React.CSSProperties> = {
   card:  { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
@@ -31,20 +32,6 @@ function StatusBadge({ v }: { v: number }) {
   if (v >= 0.10) return <Badge color="#f59e0b">● {P(v)}</Badge>
   return <Badge color="#ef4444">▼ {P(v)}</Badge>
 }
-function ROASBadge({ v }: { v: number }) {
-  const color = v >= 2 ? '#22c55e' : v >= 1 ? '#f59e0b' : '#ef4444'
-  return <Badge color={color}>{(+v || 0).toFixed(2)}x</Badge>
-}
-function KPI({ label, value, sub, color = '#ff9933', icon }: any) {
-  return (
-    <div style={{ ...S.card, flex: 1, minWidth: 150 }}>
-      <div style={{ fontSize: 22, marginBottom: 4 }}>{icon}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', letterSpacing: -1 }}>{value}</div>
-      <div style={{ fontSize: 11, color: '#888', marginTop: 2, fontWeight: 600 }}>{label}</div>
-      {sub && <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{sub}</div>}
-    </div>
-  )
-}
 function MiniBar({ data, height = 100, colorFn }: { data: { l: string; v: number }[]; height?: number; colorFn?: (i: number) => string }) {
   const max = Math.max(...data.map(d => d.v), 1)
   return (
@@ -52,20 +39,22 @@ function MiniBar({ data, height = 100, colorFn }: { data: { l: string; v: number
       {data.map((d, i) => (
         <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
           <div style={{ width: '100%', background: colorFn ? colorFn(i) : '#ff6600', borderRadius: '3px 3px 0 0', height: `${(d.v / max) * (height - 20)}px`, minHeight: d.v > 0 ? 3 : 0, transition: 'height .4s' }} />
-          <span style={{ fontSize: 9, color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: 60, textOverflow: 'ellipsis', textAlign: 'center' }}>{d.l}</span>
+          <span style={{ fontSize: 9, color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', maxWidth: 50, textOverflow: 'ellipsis', textAlign: 'center' }}>{d.l}</span>
         </div>
       ))}
     </div>
   )
 }
 
-export default function AnaliseAdsPage() {
+export default function AnaliseProdutosPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
+  const [busca,      setBusca]      = useState('')
+  const [ordenar,    setOrdenar]    = useState<'rec'|'qtd'|'lucro'|'margem'>('rec')
   const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
 
   useEffect(() => { loadData() }, [])
@@ -74,7 +63,7 @@ export default function AnaliseAdsPage() {
     setLoading(true)
     const [finRes, adsRes] = await Promise.all([
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
-      supabase.from('ads').select('*').order('data', { ascending: false }),
+      supabase.from('ads').select('*'),
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
@@ -95,28 +84,44 @@ export default function AnaliseAdsPage() {
     return true
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
-  // Por loja (idêntico ao TabAnaliseAds do App.js)
-  const lojasList = lojaFiltro === 'Todas' ? LOJAS : [lojaFiltro]
-  const rows = useMemo(() => lojasList.map(loja => {
-    const lp    = finF.filter(f => f.loja === loja)
-    const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-    const taxas = rec * TAXA_SHOPEE + lp.length * TAXA_FIXA
-    const imp   = rec * imposto
-    const lucOp = rec - taxas - imp
-    const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
-    const ll    = lucOp - gads
-    return { loja, rec, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, margem: rec > 0 ? ll / rec : 0 }
-  }), [finF, adsF, imposto, lojaFiltro])
+  const totalAds = adsF.reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
 
-  const totRec = rows.reduce((s, r) => s + r.rec, 0)
-  const totAds = rows.reduce((s, r) => s + r.gads, 0)
-  const totLL  = rows.reduce((s, r) => s + r.ll, 0)
-  const totLucOp = rows.reduce((s, r) => s + r.lucOp, 0)
+  // Agregação por SKU (idêntico ao TabAnaliseProd do App.js)
+  const skuMap = useMemo(() => {
+    const map: Record<string, any> = {}
+    finF.forEach(f => {
+      const sku = f.sku || 'SEM SKU'
+      if (!map[sku]) map[sku] = { sku, nome: f.nome_produto || sku, rec: 0, lucro: 0, qtd: 0, lojas: new Set<string>() }
+      const rec    = f.valor_bruto || 0
+      const cProd  = f.custo_produto || 0
+      const cEmb   = f.custo_embalagem || 0
+      const taxas  = rec * TAXA_SHOPEE + TAXA_FIXA
+      const imp    = rec * imposto
+      const lucro  = rec - taxas - cProd - cEmb - imp
+      map[sku].rec   += rec
+      map[sku].lucro += lucro
+      map[sku].qtd   += f.quantidade || 1
+      map[sku].lojas.add(f.loja || '')
+    })
+    return map
+  }, [finF, imposto])
 
-  // Por dia
-  const byDay: Record<string, number> = {}
-  adsF.forEach(a => { byDay[a.data] = (byDay[a.data] || 0) + (a.gasto || a.investimento || 0) })
-  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
+  const totalRec = Object.values(skuMap).reduce((s: number, r: any) => s + r.rec, 0)
+
+  const rows = useMemo(() => {
+    return Object.values(skuMap)
+      .map((s: any) => ({
+        ...s,
+        margem: s.rec > 0 ? s.lucro / s.rec : 0,
+        // Rateio de Ads proporcional ao faturamento (igual ao App.js analise_prod)
+        adsRateado: totalRec > 0 ? (s.rec / totalRec) * totalAds : 0,
+        lucroLiq: s.lucro - (totalRec > 0 ? (s.rec / totalRec) * totalAds : 0),
+      }))
+      .filter(s => !busca || s.sku.toLowerCase().includes(busca.toLowerCase()) || s.nome.toLowerCase().includes(busca.toLowerCase()))
+      .sort((a: any, b: any) => b[ordenar] - a[ordenar])
+  }, [skuMap, busca, ordenar, totalAds, totalRec])
+
+  const top10 = rows.slice(0, 10)
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -127,7 +132,7 @@ export default function AnaliseAdsPage() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📈 Análise de Anúncios — ROAS e Eficiência por Loja</h2>
+        <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>🔍 Análise de Produtos — Desempenho por SKU</h2>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
           <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
@@ -144,87 +149,104 @@ export default function AnaliseAdsPage() {
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140 } as any} />
         <span style={{ color: '#555', fontSize: 12 }}>até</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140 } as any} />
-        {(lojaFiltro !== 'Todas' || dateFrom || dateTo) && (
-          <button onClick={() => { setLojaFiltro('Todas'); setDateFrom(''); setDateTo('') }} style={S.btnSm as any}>✕ Limpar</button>
+        <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="🔍 Buscar SKU..." style={{ ...S.inp, width: 160 } as any} />
+        {(lojaFiltro !== 'Todas' || dateFrom || dateTo || busca) && (
+          <button onClick={() => { setLojaFiltro('Todas'); setDateFrom(''); setDateTo(''); setBusca('') }} style={S.btnSm as any}>✕ Limpar</button>
         )}
+        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+          {[['rec', '$ Receita'], ['qtd', '# Qtd'], ['lucro', '✓ Lucro'], ['margem', '% Margem']].map(([id, label]) => (
+            <button key={id} onClick={() => setOrdenar(id as any)} style={{
+              background: ordenar === id ? '#ff660033' : 'transparent',
+              border: `1px solid ${ordenar === id ? '#ff6600' : '#2a2a3a'}`,
+              color: ordenar === id ? '#ff6600' : '#555',
+              borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: ordenar === id ? 700 : 400
+            }}>{label}</button>
+          ))}
+        </div>
       </div>
 
-      {/* 4 KPIs */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI icon="💰" label="Receita Total"  value={R(totRec)}  color="#ff9933" />
-        <KPI icon="📣" label="Total Ads"      value={R(totAds)}  color="#e67e22" />
-        <KPI icon="⚡" label="ROAS Geral"     value={`${(totAds > 0 ? totRec / totAds : 0).toFixed(2)}x`} color={totAds > 0 && totRec / totAds >= 2 ? '#22c55e' : '#f59e0b'} />
-        <KPI icon="✅" label="Lucro Líquido"  value={R(totLL)}   color={totLL >= 0 ? '#22c55e' : '#ef4444'} />
+      {/* LEGENDA */}
+      <div style={{ ...S.card, marginBottom: 12, padding: '8px 14px' }}>
+        <span style={{ fontSize: 11, color: '#555' }}>
+          🔴 Margem &lt; 10% — Crítico &nbsp;·&nbsp; 🟡 10–20% — Atenção &nbsp;·&nbsp; 🟢 &gt; 20% — Saudável
+          &nbsp;·&nbsp; <span style={{ color: '#e67e22' }}>Ads rateados proporcionalmente ao faturamento de cada SKU</span>
+        </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        {/* TABELA POR LOJA */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+        {/* GRÁFICO TOP 10 */}
         <div style={S.card}>
-          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>🏪 Por Loja</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {['Loja', 'Receita', 'Lucro Op', 'Gasto Ads', 'ROAS', 'Lucro Líq', 'Margem Líq'].map(h => (
-                    <th key={h} style={S.th as any}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(r => (
-                  <tr key={r.loja} style={{ borderBottom: '1px solid #1e1e2a' }}>
-                    <td style={S.td as any}><span style={{ color: LOJA_COLORS[r.loja], fontWeight: 700 }}>{r.loja}</span></td>
-                    <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace' }}>{R(r.rec)}</span></td>
-                    <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', color: r.lucOp >= 0 ? '#22c55e' : '#ef4444' }}>{R(r.lucOp)}</span></td>
-                    <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', color: '#e67e22' }}>{R(r.gads)}</span></td>
-                    <td style={S.td as any}><ROASBadge v={r.roas} /></td>
-                    <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', fontWeight: 700, color: r.ll >= 0 ? '#22c55e' : '#ef4444' }}>{R(r.ll)}</span></td>
-                    <td style={S.td as any}><StatusBadge v={r.margem} /></td>
-                  </tr>
-                ))}
-                <tr style={{ background: '#0f0f13', borderTop: '2px solid #2a2a3a' }}>
-                  <td style={{ ...S.td as any, fontWeight: 800 }}>TOTAL</td>
-                  <td style={{ ...S.td as any, textAlign: 'right' as any, fontFamily: 'monospace', fontWeight: 800, color: '#ff9933' }}>{R(totRec)}</td>
-                  <td style={{ ...S.td as any, textAlign: 'right' as any, fontFamily: 'monospace', fontWeight: 800, color: totLucOp >= 0 ? '#22c55e' : '#ef4444' }}>{R(totLucOp)}</td>
-                  <td style={{ ...S.td as any, textAlign: 'right' as any, fontFamily: 'monospace', fontWeight: 800, color: '#e67e22' }}>{R(totAds)}</td>
-                  <td style={S.td as any}><ROASBadge v={totAds > 0 ? totRec / totAds : 0} /></td>
-                  <td style={{ ...S.td as any, textAlign: 'right' as any, fontFamily: 'monospace', fontWeight: 800, color: totLL >= 0 ? '#22c55e' : '#ef4444' }}>{R(totLL)}</td>
-                  <td style={S.td as any}><StatusBadge v={totRec > 0 ? totLL / totRec : 0} /></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📊 Top 10 SKUs — {ordenar === 'rec' ? 'Receita' : ordenar === 'qtd' ? 'Qtd' : ordenar === 'lucro' ? 'Lucro' : 'Margem'}</div>
+          <MiniBar
+            data={top10.map((s: any) => ({ l: s.sku, v: ordenar === 'margem' ? s.margem * 100 : s[ordenar] }))}
+            height={130}
+            colorFn={i => {
+              const m = top10[i]?.margem || 0
+              return m >= 0.20 ? '#22c55e' : m >= 0.10 ? '#f59e0b' : '#ef4444'
+            }}
+          />
         </div>
 
-        {/* VISUALIZAÇÃO ROAS */}
+        {/* RESUMO */}
         <div style={S.card}>
-          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>⚡ ROAS por Loja</div>
-          <MiniBar data={rows.map(r => ({ l: r.loja.split(' ')[0], v: r.roas }))} height={130} colorFn={i => [LOJA_COLORS[rows[i]?.loja] || '#ff6600'][0]} />
-          <div style={{ marginTop: 12 }}>
-            {rows.map(r => (
-              <div key={r.loja} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, padding: '7px 12px', background: '#13131e', borderRadius: 6 }}>
-                <span style={{ color: LOJA_COLORS[r.loja], fontWeight: 600, fontSize: 12 }}>{r.loja}</span>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11 }}>
-                  <span style={{ fontFamily: 'monospace' }}>{R(r.rec)}</span>
-                  <span style={{ fontFamily: 'monospace', color: '#e67e22' }}>{R(r.gads)} ads</span>
-                  <ROASBadge v={r.roas} />
-                </div>
+          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📈 Resumo Geral</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {[
+              ['SKUs Únicos',     String(rows.length),                         '#a78bfa'],
+              ['Receita Total',   R(rows.reduce((s: any, r: any) => s + r.rec, 0)),  '#ff9933'],
+              ['Lucro Op Total',  R(rows.reduce((s: any, r: any) => s + r.lucro, 0)), rows.reduce((s: any, r: any) => s + r.lucro, 0) >= 0 ? '#22c55e' : '#ef4444'],
+              ['Total Ads',       R(totalAds),                                '#e67e22'],
+              ['Lucro Líq Real',  R(rows.reduce((s: any, r: any) => s + r.lucroLiq, 0)), rows.reduce((s: any, r: any) => s + r.lucroLiq, 0) >= 0 ? '#22c55e' : '#ef4444'],
+              ['Margem Média',    P(rows.reduce((s: any, r: any) => s + r.margem, 0) / (rows.length || 1)), '#888'],
+            ].map(([l, v, c]) => (
+              <div key={l as string} style={{ padding: '10px 12px', background: '#13131e', borderRadius: 6 }}>
+                <div style={{ fontSize: 10, color: '#555', textTransform: 'uppercase', letterSpacing: 0.8 }}>{l}</div>
+                <div style={{ fontFamily: 'monospace', fontWeight: 700, color: c as string, fontSize: 14 }}>{v}</div>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: '#555', borderTop: '1px solid #2a2a3a', paddingTop: 10 }}>
-            🔴 ROAS &lt; 1 = prejuízo com ads · 🟡 1–2x = atenção · 🟢 &gt; 2x = campanha eficiente
-          </div>
         </div>
       </div>
 
-      {/* Ads por Dia */}
-      {dayChart.length > 0 && (
-        <div style={{ ...S.card, marginTop: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📅 Gasto Ads por Dia</div>
-          <MiniBar data={dayChart} height={100} colorFn={() => '#e67e22'} />
+      {/* TABELA COMPLETA */}
+      <div style={S.card}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['#', 'SKU Venda', 'Produto', 'Qtd Vendida', 'Receita Total', 'Lucro Op', 'Ads Rateado', 'Lucro Líq', 'Margem Op', 'Lojas'].map(h => (
+                  <th key={h} style={S.th as any}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s: any, i: number) => (
+                <tr key={s.sku} style={{ borderBottom: '1px solid #1e1e2a' }}>
+                  <td style={S.td as any}><span style={{ color: '#555', fontFamily: 'monospace' }}>{i + 1}</span></td>
+                  <td style={S.td as any}><span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11, fontWeight: 700 }}>{s.sku}</span></td>
+                  <td style={S.td as any}><span style={{ fontWeight: 600 }}>{s.nome}</span></td>
+                  <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace' }}>{N(s.qtd)}</span></td>
+                  <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace' }}>{R(s.rec)}</span></td>
+                  <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', color: s.lucro >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(s.lucro)}</span></td>
+                  <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', color: '#e67e22' }}>{R(s.adsRateado)}</span></td>
+                  <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', color: s.lucroLiq >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(s.lucroLiq)}</span></td>
+                  <td style={S.td as any}><StatusBadge v={s.margem} /></td>
+                  <td style={S.td as any}>
+                    <div style={{ display: 'flex', gap: 3 }}>
+                      {[...s.lojas].filter(Boolean).map((l: any) => (
+                        <Badge key={l} color={LOJA_COLORS[l] || '#ff6600'}>{(l as string).split(' ')[0]}</Badge>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr><td colSpan={10} style={{ ...S.td as any, textAlign: 'center', padding: 48, color: '#555' }}>Sem dados no período</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   )
 }
