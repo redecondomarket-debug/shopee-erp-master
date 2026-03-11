@@ -69,7 +69,7 @@ function MiniBar({ data, height = 100, colorFn }: { data: { l: string; v: number
 }
 function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]; rows: React.ReactNode[][]; emptyMsg?: string }) {
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div style={{ overflowX: 'auto', width: '100%' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{headers.map((h, i) => <th key={i} style={S.th as any}>{h}</th>)}</tr></thead>
         <tbody>
@@ -212,7 +212,7 @@ export default function DashboardPage() {
   )
 
   return (
-    <div>
+    <div style={{ padding: "20px 24px", width: "100%", boxSizing: "border-box" }}>
       {/* FILTROS */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -253,7 +253,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Resultado por Loja + Gráfico Dia */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%', marginBottom: 20 }}>
         <div style={S.card}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8', letterSpacing: 0.2 }}>🏪 Resultado por Loja</div>
           <Table
@@ -282,7 +282,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Top Produtos + Alertas Estoque */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%' }}>
         <div style={S.card}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8', letterSpacing: 0.2 }}>🏆 Top Produtos por Receita</div>
           <Table
