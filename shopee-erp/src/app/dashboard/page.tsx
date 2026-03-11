@@ -123,8 +123,13 @@ export default function DashboardPage() {
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
   // ── KPIs (lógica idêntica ao App.js) ──────────────────────────────────────
-  const totalRec   = finF.reduce((s, f) => s + (f.valor_bruto  || 0), 0)
-  const totalLucOp = finF.reduce((s, f) => s + (f.valor_liquido || 0), 0)
+  const totalRec   = finF.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto  || 0), 0)
+  const totalTaxas = finF.reduce((s, f) => s + (f.taxa_shopee   || 0) + (f.taxa_fixa || 0), 0)
+  const totalCprod = finF.reduce((s, f) => s + (f.custo_produto || 0), 0)
+  const totalCemb  = finF.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+  const totalMC    = totalRec - totalTaxas - totalCprod - totalCemb   // MC = Rec - Custos Variáveis
+  const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
+  const totalLucOp = finF.reduce((s, f) => s + (f.lucro_operacional || f.valor_liquido || 0), 0)
   const totalAds   = adsF.reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
   const lucroLiq   = totalLucOp - totalAds
   const margemLiq  = totalRec > 0 ? lucroLiq / totalRec : 0
@@ -134,12 +139,16 @@ export default function DashboardPage() {
 
   // Resultado por loja (igual ao App.js)
   const porLoja = LOJAS.map(loja => {
-    const lp   = finF.filter(f => f.loja === loja)
-    const rec  = lp.reduce((s, f) => s + (f.valor_bruto   || 0), 0)
-    const lucOp= lp.reduce((s, f) => s + (f.valor_liquido || 0), 0)
-    const gads = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
-    const ll   = lucOp - gads
-    return { loja, rec, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, peds: new Set(lp.map(f => f.numero_pedido)).size }
+    const lp    = finF.filter(f => f.loja === loja)
+    const rec   = lp.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+    const taxas = lp.reduce((s, f) => s + (f.taxa_shopee || 0) + (f.taxa_fixa || 0), 0)
+    const cprod = lp.reduce((s, f) => s + (f.custo_produto || 0), 0)
+    const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+    const mc    = rec - taxas - cprod - cemb
+    const lucOp = lp.reduce((s, f) => s + (f.lucro_operacional || f.valor_liquido || 0), 0)
+    const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+    const ll    = lucOp - gads
+    return { loja, rec, mc, mcPct: rec > 0 ? mc / rec : 0, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, peds: new Set(lp.map(f => f.numero_pedido)).size }
   })
 
   // Top SKUs
@@ -202,12 +211,12 @@ export default function DashboardPage() {
 
       {/* 6 KPIs (idêntico ao App.js) */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI icon="💰" label="Faturamento Total"  value={R(totalRec)}          color="#ff9933"                                              sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
-        <KPI icon="✅" label="Lucro Líquido Real" value={R(lucroLiq)}           color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'}               sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
-        <KPI icon="📈" label="Margem Líquida"     value={P(margemLiq)}          color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
-        <KPI icon="📣" label="Total Shopee Ads"   value={R(totalAds)}           color="#e67e22"                                              sub={`ROAS: ${roas.toFixed(2)}x`} />
-        <KPI icon="⚡" label="ROAS Geral"         value={`${roas.toFixed(2)}x`} color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'} sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
-        <KPI icon="🛒" label="Total de Pedidos"   value={N(pedSet)}             color="#a78bfa"                                              sub={`Ticket médio: ${R(ticket)}`} />
+        <KPI icon="💰" label="Faturamento Total"        value={R(totalRec)}          color="#ff9933"                                                    sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
+        <KPI icon="📊" label="Margem de Contribuição"   value={`${R(totalMC)} · ${P(mcPct)}`} color={mcPct >= 0.30 ? '#a78bfa' : mcPct >= 0.15 ? '#f59e0b' : '#ef4444'} sub="Receita − Custos Variáveis" />
+        <KPI icon="✅" label="Lucro Líquido Real"       value={R(lucroLiq)}          color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'}                      sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
+        <KPI icon="📈" label="Margem Líquida"           value={P(margemLiq)}         color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
+        <KPI icon="⚡" label="ROAS Geral"               value={`${roas.toFixed(2)}x`} color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'} sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
+        <KPI icon="🛒" label="Total de Pedidos"         value={N(pedSet)}            color="#a78bfa"                                                    sub={`Ticket médio: ${R(ticket)}`} />
       </div>
 
       {/* Resultado por Loja + Gráfico Dia */}
@@ -215,10 +224,12 @@ export default function DashboardPage() {
         <div style={S.card}>
           <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12 }}>🏪 Resultado por Loja</div>
           <Table
-            headers={['Loja', 'Faturamento', 'Lucro Op', 'Gasto Ads', 'Lucro Líq', 'ROAS', 'Margem']}
+            headers={['Loja', 'Faturamento', 'Mg Contrib', 'MC%', 'Lucro Op', 'Gasto Ads', 'Lucro Líq', 'ROAS', 'Margem']}
             rows={porLoja.map(l => [
               <span style={{ color: LOJA_COLORS[l.loja], fontWeight: 700, fontSize: 11 }}>{l.loja}</span>,
               <span style={{ fontFamily: 'monospace' }}>{R(l.rec)}</span>,
+              <span style={{ fontFamily: 'monospace', color: '#a78bfa', fontWeight: 700 }}>{R(l.mc)}</span>,
+              <span style={{ background: l.mcPct >= 0.30 ? '#22c55e22' : l.mcPct >= 0.15 ? '#f59e0b22' : '#ef444422', color: l.mcPct >= 0.30 ? '#22c55e' : l.mcPct >= 0.15 ? '#f59e0b' : '#ef4444', border: `1px solid ${l.mcPct >= 0.30 ? '#22c55e44' : l.mcPct >= 0.15 ? '#f59e0b44' : '#ef444444'}`, borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 700 }}>{P(l.mcPct)}</span>,
               <span style={{ fontFamily: 'monospace' }}>{R(l.lucOp)}</span>,
               <span style={{ fontFamily: 'monospace', color: '#e67e22' }}>{R(l.gads)}</span>,
               <span style={{ fontFamily: 'monospace', color: l.ll >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(l.ll)}</span>,
