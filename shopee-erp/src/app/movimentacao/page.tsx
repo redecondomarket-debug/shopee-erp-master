@@ -123,7 +123,7 @@ export default function MovimentacaoPage() {
     filtersRow: { display: 'flex', gap: 10, flexWrap: 'wrap' as const, alignItems: 'center', marginBottom: 20 },
     input: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text-primary)', fontSize: 13 },
     btnSecondary: { background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
-    card: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 16 },
+    card: { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
     grid4: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 20 },
     kpi: { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 20px' },
     kpiLabel: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, color: 'var(--text-muted)', marginBottom: 4 },
@@ -234,7 +234,7 @@ export default function MovimentacaoPage() {
 
           {/* Tabela de pedidos detalhada */}
           <div style={S.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
                 📋 Pedidos — {filtradas.length} registros
               </h2>
