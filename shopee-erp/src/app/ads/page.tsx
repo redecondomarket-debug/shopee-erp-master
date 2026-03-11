@@ -63,7 +63,7 @@ export default function AdsPage() {
     setLoading(true)
     const { data, error } = await supabase.from('ads').select('*').order('data', { ascending: false })
     if (error) { showToast('Erro ao carregar: ' + error.message, 'err') }
-    setAds((data || []).map((a: any) => ({ ...a, roas: (a.investimento||a.gasto||0) > 0 ? a.vendas_geradas / (a.investimento||a.gasto||1) : 0 })))
+    setAds((data || []).map((a: any) => ({ ...a, roas: (a.investimento||0) > 0 ? a.vendas_geradas / (a.investimento||1) : 0 })))
     setLoading(false)
   }
 
@@ -83,7 +83,6 @@ export default function AdsPage() {
       produto:        newAd.produto,
       investimento:   inv,
       vendas_geradas: vend,
-      gasto:          inv,
       roas,
     }
 
@@ -128,7 +127,7 @@ export default function AdsPage() {
     return true
   })
 
-  const totalInv    = filtered.reduce((s, a) => s + (a.investimento || a.gasto || 0), 0)
+  const totalInv    = filtered.reduce((s, a) => s + (a.investimento || 0), 0)
   const totalVendas = filtered.reduce((s, a) => s + (a.vendas_geradas || 0), 0)
   const roasGeral   = totalInv > 0 ? totalVendas / totalInv : 0
 
@@ -199,7 +198,7 @@ export default function AdsPage() {
               {filtered.length === 0 ? (
                 <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center', padding: '40px', color: '#55556a' }}>Nenhum anúncio registrado</td></tr>
               ) : filtered.map(ad => {
-                const inv  = ad.investimento || ad.gasto || 0
+                const inv  = ad.investimento || 0
                 const roas = inv > 0 ? ad.vendas_geradas / inv : 0
                 const cor  = LOJA_COLORS[ad.loja] || '#ff6600'
                 return (
