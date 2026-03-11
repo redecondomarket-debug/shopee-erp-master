@@ -160,6 +160,8 @@ function parseShopeeRow(row: Record<string, any>): any | null {
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function FinanceiroPage() {
   const [rows,       setRows]       = useState<any[]>([])
+  const [skuMap,     setSkuMap]     = useState<any[]>([])
+  const [estoque,    setEstoque]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [saving,     setSaving]     = useState(false)
   const [toast,      setToast]      = useState<{ msg: string; type: string } | null>(null)
@@ -182,9 +184,28 @@ export default function FinanceiroPage() {
 
   async function loadData() {
     setLoading(true)
-    const { data } = await supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000)
-    setRows(data || [])
+    const [finRes, mapRes, estRes] = await Promise.all([
+      supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
+      supabase.from('sku_map').select('*'),
+      supabase.from('estoque').select('*'),
+    ])
+    setRows(finRes.data || [])
+    setSkuMap(mapRes.data || [])
+    setEstoque(estRes.data || [])
     setLoading(false)
+  }
+
+  // ── Calcula custo do produto cruzando sku_map + estoque ──────────────────
+  function calcCustoProduto(skuVendido: string, quantidade: number): number {
+    if (!skuVendido) return 0
+    const componentes = skuMap.filter(m => m.sku_venda === skuVendido)
+    if (!componentes.length) return 0
+    return componentes.reduce((total, comp) => {
+      const prod = estoque.find(e => e.sku_base === comp.sku_base)
+      if (!prod) return total
+      const custoUnit = (prod.custo || 0) + (prod.custo_embalagem || 0)
+      return total + custoUnit * (comp.quantidade || 1) * quantidade
+    }, 0)
   }
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
@@ -278,21 +299,23 @@ export default function FinanceiroPage() {
     return true
   }).map(r => {
     const recBruta = r.receita_bruta || r.valor_bruto || 0
-    // Usa taxas reais do banco; se zeradas (dados antigos), recalcula pelos percentuais padrão
     const taxaShopee = (r.taxa_shopee && r.taxa_shopee > 0)
       ? r.taxa_shopee
       : recBruta * TAXA_SHOPEE
     const taxaFixa   = (r.taxa_fixa && r.taxa_fixa > 0)
       ? r.taxa_fixa
       : TAXA_FIXA
-    const cProd      = r.custo_produto    || 0
+    // Custo produto: usa banco se preenchido, senão calcula via sku_map + estoque
+    const skuVenda = r.sku_vendido || r.sku || ''
+    const custoProdCalc = calcCustoProduto(skuVenda, r.quantidade || 1)
+    const cProd      = (r.custo_produto && r.custo_produto > 0) ? r.custo_produto : custoProdCalc
     const cEmb       = (r.custo_embalagem || 0) + (custoEmb || 0)
     const imp        = recBruta * imposto
     const custoTotal = taxaShopee + taxaFixa + cProd + cEmb + imp
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
     return { ...r, recBruta, taxaShopee, taxaFixa, custoProd: cProd, imp, custoTotal, lucroOp, margem }
-  }), [rows, filterLoja, dateFrom, dateTo, imposto, custoEmb])
+  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto, custoEmb])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
   const totLuc  = filtered.reduce((s, r) => s + r.lucroOp,  0)
