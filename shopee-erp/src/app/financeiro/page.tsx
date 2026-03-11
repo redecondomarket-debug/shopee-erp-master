@@ -42,7 +42,7 @@ function StatusBadge({ v }: { v: number }) {
 }
 function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]; rows: React.ReactNode[][]; emptyMsg?: string }) {
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div style={{ overflowX: 'auto', width: '100%' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{headers.map((h, i) => <th key={i} style={S.th as any}>{h}</th>)}</tr></thead>
         <tbody>
@@ -338,7 +338,7 @@ export default function FinanceiroPage() {
   )
 
   return (
-    <div>
+    <div style={{ padding: "20px 24px", width: "100%", boxSizing: "border-box" }}>
       {/* HEADER */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>💰 Financeiro — Pedidos Shopee</h2>
