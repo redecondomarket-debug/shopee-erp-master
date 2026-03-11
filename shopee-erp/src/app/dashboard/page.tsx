@@ -165,7 +165,7 @@ export default function DashboardPage() {
   // Chart por dia
   const byDay: Record<string, number> = {}
   finF.forEach(f => { byDay[f.data] = (byDay[f.data] || 0) + (f.valor_bruto || 0) })
-  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(5), v }))
+  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
 
   // Alertas de estoque
   const criticos = estoque.filter(e => (e.estoque_atual || 0) <= (e.estoque_minimo || 0))
