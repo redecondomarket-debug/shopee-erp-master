@@ -196,16 +196,25 @@ export default function FinanceiroPage() {
   }
 
   // ── Calcula custo do produto cruzando sku_map + estoque ──────────────────
+  // custo_embalagem é FIXO por venda (não multiplica pela qtd de componentes)
   function calcCustoProduto(skuVendido: string, quantidade: number): number {
     if (!skuVendido) return 0
     const componentes = skuMap.filter(m => m.sku_venda === skuVendido)
     if (!componentes.length) return 0
-    return componentes.reduce((total, comp) => {
+
+    // Custo do produto = Σ (custo_unitario × qtd_componente × qtd_pedido)
+    const custoProd = componentes.reduce((total, comp) => {
       const prod = estoque.find(e => e.sku_base === comp.sku_base)
       if (!prod) return total
-      const custoUnit = (prod.custo || 0) + (prod.custo_embalagem || 0)
-      return total + custoUnit * (comp.quantidade || 1) * quantidade
+      return total + (prod.custo || 0) * (comp.quantidade || 1) * quantidade
     }, 0)
+
+    // Custo embalagem = fixo por venda (pega do primeiro componente, não multiplica)
+    const primeiroComp = componentes[0]
+    const prodPrincipal = estoque.find(e => e.sku_base === primeiroComp?.sku_base)
+    const custoEmb = prodPrincipal?.custo_embalagem || 0
+
+    return custoProd + custoEmb
   }
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
