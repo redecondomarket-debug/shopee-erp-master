@@ -80,18 +80,19 @@ function calcLinha(recBruta: number, custoProd: number, custoEmb: number, impost
 // CORREÇÃO 2: usa "Agreed Price" como receita real (não "Original Price")
 // CORREÇÃO 3: usa taxas reais da planilha ("Shopee Commission" + "Shopee Fee")
 function parseShopeeRow(row: Record<string, any>): any | null {
-  // ── Pedido e status ───────────────────────────────────────────────────────
-  const numPedido = String(row['Order ID'] || row['No. Pesanan'] || '').trim()
-  const status    = String(row['Order Status'] || row['Status Pesanan'] || '').trim()
+  // ── Pedido e status (EN + PT) ─────────────────────────────────────────────
+  const numPedido = String(row['Order ID'] || row['ID do pedido'] || row['No. Pesanan'] || '').trim()
+  const status    = String(row['Order Status'] || row['Status do pedido'] || row['Status Pesanan'] || '').trim()
 
-  // Filtrar apenas pedidos concluídos/enviados
-  const statusOk = ['Completed', 'Concluído', 'Pedido concluído', 'Shipped', 'Enviado']
+  // Status válidos — EN, PT e variações
   const statusUpper = status.toUpperCase()
-  const valido = statusOk.some(s => statusUpper.includes(s.toUpperCase()))
-  if (!valido || !numPedido) return null
+  const statusInvalido = ['CANCELADO', 'CANCELLED', 'CANCELED']
+  if (statusInvalido.some(s => statusUpper.includes(s))) return null
+  // Aceita qualquer status que não seja cancelado e tenha pedido
+  if (!numPedido) return null
 
-  // ── Data ──────────────────────────────────────────────────────────────────
-  const dataRaw = row['Order Creation Date'] || row['Tanggal Pembuatan Pesanan'] || ''
+  // ── Data (EN + PT) ────────────────────────────────────────────────────────
+  const dataRaw = row['Order Creation Date'] || row['Data de criação do pedido'] || row['Tanggal Pembuatan Pesanan'] || ''
   let data = ''
   if (dataRaw) {
     const s = String(dataRaw).trim()
@@ -104,34 +105,33 @@ function parseShopeeRow(row: Record<string, any>): any | null {
       const [d, m, y] = s.split('-')
       data = `${y}-${m}-${d}`
     } else if (!isNaN(Number(s)) && Number(s) > 10000) {
-      // Excel serial date
       const dt = new Date(Math.round((Number(s) - 25569) * 86400 * 1000))
       data = dt.toISOString().slice(0, 10)
     }
   }
   if (!data) return null
 
-  // ── Produto e SKU ─────────────────────────────────────────────────────────
-  const nomeProd  = String(row['Product Name']   || row['Nama Produk']     || '').trim()
-  const skuVenda  = String(row['Seller SKU']     || row['SKU Referensi']   || row['SKU'] || '').trim()
-  const skuPrinc  = String(row['SKU Reference No.'] || skuVenda).trim()
+  // ── Produto e SKU (EN + PT) ───────────────────────────────────────────────
+  const nomeProd  = String(row['Product Name'] || row['Nome do Produto'] || row['Nama Produk'] || '').trim()
+  const skuVenda  = String(row['Seller SKU'] || row['Número de referência SKU'] || row['SKU Referensi'] || row['SKU'] || '').trim()
+  const skuPrinc  = String(row['SKU Reference No.'] || row['Nº de referência do SKU principal'] || skuVenda).trim()
 
-  // ── Quantidade ────────────────────────────────────────────────────────────
-  const quantidade = parseInt(String(row['Quantity'] || row['Jumlah'] || '1')) || 1
+  // ── Quantidade (EN + PT) ──────────────────────────────────────────────────
+  const quantidade = parseInt(String(row['Quantity'] || row['Quantidade'] || row['Jumlah'] || '1')) || 1
 
-  // ── CORREÇÃO 2: Usar Agreed Price como receita real ───────────────────────
+  // ── Preços (EN + PT) ──────────────────────────────────────────────────────
   const num = (v: any) => parseFloat(String(v || '0').replace(/[^0-9.,\-]/g, '').replace(',', '.')) || 0
-  const precoAcordado  = num(row['Agreed Price']    || row['Harga Kesepakatan'])
-  const precoOriginal  = num(row['Original Price']  || row['Harga Asli'])        // apenas para exibição
-  const precoUnitario  = precoAcordado > 0 ? precoAcordado : precoOriginal
-  const valorBruto     = precoUnitario * quantidade  // ← Agreed Price × Qtd
+  const precoAcordado = num(row['Agreed Price']   || row['Preço acordado']  || row['Harga Kesepakatan'])
+  const precoOriginal = num(row['Original Price'] || row['Preço original']  || row['Harga Asli'])
+  const precoUnitario = precoAcordado > 0 ? precoAcordado : precoOriginal
+  const valorBruto    = precoUnitario * quantidade
 
-  // ── CORREÇÃO 3: Taxas reais da planilha — NÃO recalcular ─────────────────
-  const comissaoShopee = Math.abs(num(row['Shopee Commission'] || row['Komisi Shopee'] || 0))
-  const taxaShopee     = Math.abs(num(row['Shopee Fee']       || row['Biaya Shopee']   || 0))
-  const valorLiquido   = num(row['Final Amount Received'] || row['Total Diterima'] || 0)
+  // ── Taxas reais (EN + PT) ─────────────────────────────────────────────────
+  const comissaoShopee = Math.abs(num(row['Shopee Commission'] || row['Taxa de comissão bruta'] || row['Komisi Shopee'] || 0))
+  const taxaShopee     = Math.abs(num(row['Shopee Fee']        || row['Taxa de serviço bruta']  || row['Biaya Shopee'] || 0))
+  const valorLiquido   = num(row['Final Amount Received'] || row['Total global'] || row['Total Diterima'] || 0)
 
-  // ── Loja (coluna adicionada manualmente pelo usuário) ─────────────────────
+  // ── Loja (EN + PT) ────────────────────────────────────────────────────────
   const lojaRaw = String(row['Store Name'] || row['Loja'] || row['LOJA'] || '').trim().toUpperCase()
   const loja = LOJAS.find(l => lojaRaw.includes(l.split(' ')[0].toUpperCase())) || lojaRaw || LOJAS[0]
 
