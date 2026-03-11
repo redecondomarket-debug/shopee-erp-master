@@ -34,36 +34,77 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
 }
 
 export default function AdsPage() {
-  const [ads,       setAds]       = useState<Ad[]>([])
-  const [loading,   setLoading]   = useState(true)
-  const [lojaFil,   setLojaFil]   = useState('Todas')
-  const [dateFrom,  setDateFrom]  = useState('')
-  const [dateTo,    setDateTo]    = useState('')
-  const [showAdd,   setShowAdd]   = useState(false)
-  const [showDel,   setShowDel]   = useState(false)
-  const [limpando,  setLimpando]  = useState(false)
-  const [toast,     setToast]     = useState('')
-  const [newAd, setNewAd] = useState({ data: new Date().toISOString().slice(0,10), loja: LOJAS[0], produto: '', investimento: 0, vendas_geradas: 0 })
+  const [ads,      setAds]      = useState<Ad[]>([])
+  const [loading,  setLoading]  = useState(true)
+  const [saving,   setSaving]   = useState(false)
+  const [lojaFil,  setLojaFil]  = useState('Todas')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo,   setDateTo]   = useState('')
+  const [showAdd,  setShowAdd]  = useState(false)
+  const [showDel,  setShowDel]  = useState(false)
+  const [limpando, setLimpando] = useState(false)
+  const [toast,    setToast]    = useState({ msg: '', type: 'ok' })
+  const [newAd, setNewAd] = useState({
+    data: new Date().toISOString().slice(0,10),
+    loja: LOJAS[0],
+    produto: '',
+    investimento: '' as any,
+    vendas_geradas: '' as any,
+  })
 
   useEffect(() => { load() }, [])
 
+  function showToast(msg: string, type = 'ok') {
+    setToast({ msg, type })
+    setTimeout(() => setToast({ msg: '', type: 'ok' }), 4000)
+  }
+
   async function load() {
     setLoading(true)
-    const { data } = await supabase.from('ads').select('*').order('data', { ascending: false })
+    const { data, error } = await supabase.from('ads').select('*').order('data', { ascending: false })
+    if (error) { showToast('Erro ao carregar: ' + error.message, 'err') }
     setAds((data || []).map((a: any) => ({ ...a, roas: (a.investimento||a.gasto||0) > 0 ? a.vendas_geradas / (a.investimento||a.gasto||1) : 0 })))
     setLoading(false)
   }
 
   async function addAd() {
-    const inv  = newAd.investimento
-    const roas = inv > 0 ? newAd.vendas_geradas / inv : 0
-    await supabase.from('ads').insert({ ...newAd, roas, gasto: inv })
-    setShowAdd(false); load()
+    if (!newAd.data) { showToast('Preencha a data', 'err'); return }
+    if (!newAd.produto) { showToast('Preencha o produto/campanha', 'err'); return }
+    if (!newAd.investimento || +newAd.investimento <= 0) { showToast('Preencha o investimento', 'err'); return }
+
+    setSaving(true)
+    const inv  = +newAd.investimento
+    const vend = +newAd.vendas_geradas || 0
+    const roas = inv > 0 ? vend / inv : 0
+
+    const payload = {
+      data:           newAd.data,
+      loja:           newAd.loja,
+      produto:        newAd.produto,
+      investimento:   inv,
+      vendas_geradas: vend,
+      gasto:          inv,
+      roas,
+    }
+
+    const { error } = await supabase.from('ads').insert(payload)
+    setSaving(false)
+
+    if (error) {
+      showToast('Erro ao salvar: ' + error.message, 'err')
+      return
+    }
+
+    showToast('Anúncio salvo com sucesso!')
+    setShowAdd(false)
+    setNewAd({ data: new Date().toISOString().slice(0,10), loja: LOJAS[0], produto: '', investimento: '', vendas_geradas: '' })
+    load()
   }
 
   async function delAd(id: string) {
     if (!confirm('Excluir registro?')) return
-    await supabase.from('ads').delete().eq('id', id); load()
+    await supabase.from('ads').delete().eq('id', id)
+    load()
   }
 
   async function limpar() {
@@ -72,9 +113,11 @@ export default function AdsPage() {
     if (lojaFil !== 'Todas') q = q.eq('loja', lojaFil)
     if (dateFrom) q = q.gte('data', dateFrom)
     if (dateTo)   q = q.lte('data', dateTo)
-    await q
-    setShowDel(false); setLimpando(false)
-    setToast('Registros removidos.'); setTimeout(() => setToast(''), 3000)
+    const { error } = await q
+    setShowDel(false)
+    setLimpando(false)
+    if (error) { showToast('Erro: ' + error.message, 'err'); return }
+    showToast('Registros removidos.')
     load()
   }
 
@@ -183,7 +226,11 @@ export default function AdsPage() {
       </div>
 
       {/* Toast */}
-      {toast && <div style={{ position: 'fixed', bottom: 28, right: 28, background: '#16a34a', color: '#fff', padding: '12px 22px', borderRadius: 10, fontWeight: 700, fontSize: 13, zIndex: 9999 }}>✅ {toast}</div>}
+      {toast.msg && (
+        <div style={{ position: 'fixed', bottom: 28, right: 28, background: toast.type === 'ok' ? '#16a34a' : '#dc2626', color: '#fff', padding: '12px 22px', borderRadius: 10, fontWeight: 700, fontSize: 13, zIndex: 9999 }}>
+          {toast.type === 'ok' ? '✅' : '❌'} {toast.msg}
+        </div>
+      )}
 
       {/* Modal Add */}
       {showAdd && (
@@ -193,24 +240,39 @@ export default function AdsPage() {
             <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 18 }}>✕</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={S.label}>Data</label><input type="date" value={newAd.data} onChange={e => setNewAd({ ...newAd, data: e.target.value })} style={S.inp} /></div>
-            <div><label style={S.label}>Loja</label>
+            <div>
+              <label style={S.label}>Data</label>
+              <input type="date" value={newAd.data} onChange={e => setNewAd({ ...newAd, data: e.target.value })} style={S.inp} />
+            </div>
+            <div>
+              <label style={S.label}>Loja</label>
               <select value={newAd.loja} onChange={e => setNewAd({ ...newAd, loja: e.target.value })} style={S.inp}>
                 {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
-            <div><label style={S.label}>Produto / Campanha</label><input value={newAd.produto} onChange={e => setNewAd({ ...newAd, produto: e.target.value })} placeholder="Nome da campanha" style={S.inp} /></div>
+            <div>
+              <label style={S.label}>Produto / Campanha</label>
+              <input value={newAd.produto} onChange={e => setNewAd({ ...newAd, produto: e.target.value })} placeholder="Nome da campanha" style={S.inp} />
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div><label style={S.label}>Investimento (R$)</label><input type="number" step="0.01" value={newAd.investimento} onChange={e => setNewAd({ ...newAd, investimento: +e.target.value })} style={S.inp} /></div>
-              <div><label style={S.label}>Vendas Geradas (R$)</label><input type="number" step="0.01" value={newAd.vendas_geradas} onChange={e => setNewAd({ ...newAd, vendas_geradas: +e.target.value })} style={S.inp} /></div>
+              <div>
+                <label style={S.label}>Investimento (R$)</label>
+                <input type="number" step="0.01" min="0" value={newAd.investimento} onChange={e => setNewAd({ ...newAd, investimento: e.target.value })} style={S.inp} />
+              </div>
+              <div>
+                <label style={S.label}>Vendas Geradas (R$)</label>
+                <input type="number" step="0.01" min="0" value={newAd.vendas_geradas} onChange={e => setNewAd({ ...newAd, vendas_geradas: e.target.value })} style={S.inp} />
+              </div>
             </div>
             <div style={{ background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
-              ROAS: <strong style={{ color: '#ff6600' }}>{newAd.investimento > 0 ? (newAd.vendas_geradas / newAd.investimento).toFixed(2) : '0.00'}x</strong>
+              ROAS: <strong style={{ color: '#ff6600' }}>{+newAd.investimento > 0 ? (+newAd.vendas_geradas / +newAd.investimento).toFixed(2) : '0.00'}x</strong>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
             <button onClick={() => setShowAdd(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
-            <button onClick={addAd} style={{ ...S.btn, flex: 1 }}>Salvar</button>
+            <button onClick={addAd} disabled={saving} style={{ ...S.btn, flex: 1, opacity: saving ? 0.7 : 1 }}>
+              {saving ? '⏳ Salvando...' : 'Salvar'}
+            </button>
           </div>
         </Modal>
       )}
