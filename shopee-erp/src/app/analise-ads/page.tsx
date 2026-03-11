@@ -116,7 +116,7 @@ export default function AnaliseAdsPage() {
   // Por dia
   const byDay: Record<string, number> = {}
   adsF.forEach(a => { byDay[a.data] = (byDay[a.data] || 0) + (a.gasto || a.investimento || 0) })
-  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(5), v }))
+  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240 }}>
