@@ -1,265 +1,267 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { exportToExcel, exportToPDF } from '@/lib/exports'
-import { Package, Plus, Edit3, Save, X, Download, FileText, Search, RefreshCw, ArrowUp, Trash2, AlertTriangle } from 'lucide-react'
 
-type EstoqueItem = {
-  id: string; sku_base: string; produto: string; estoque_atual: number; estoque_minimo: number; created_at: string
+const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
+
+const S = {
+  page:     { padding: '20px 24px', width: '100%', boxSizing: 'border-box' as any },
+  card:     { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:       { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:       { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:      { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any, width: '100%' },
+  btn:      { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  btnSm:    { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  btnGhost: { background: 'transparent', color: '#9090aa', border: '1px solid #2a2a3a', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 500, fontSize: 12 },
+  btnDanger:{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  label:    { fontSize: 11, color: '#55556a', marginBottom: 5, display: 'block', fontWeight: 600, letterSpacing: 0.8, textTransform: 'uppercase' as any },
 }
-type MovItem = {
-  data: string; tipo: 'ENTRADA' | 'AJUSTE'; sku_base: string; quantidade: number; origem: string; observacao: string
+
+type Item = { id: string; sku_base: string; produto: string; estoque_atual: number; estoque_minimo: number }
+type Mov  = { data: string; tipo: 'ENTRADA' | 'AJUSTE'; sku_base: string; quantidade: number; observacao: string }
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+      <div style={{ ...S.card, width: '100%', maxWidth: 480, padding: '28px 32px', position: 'relative' }}>
+        {children}
+      </div>
+    </div>
+  )
 }
 
 export default function EstoquePage() {
-  const [items, setItems] = useState<EstoqueItem[]>([])
-  const [filtered, setFiltered] = useState<EstoqueItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editValues, setEditValues] = useState<Partial<EstoqueItem>>({})
-  const [showAdd, setShowAdd] = useState(false)
-  const [showMov, setShowMov] = useState(false)
-  const [showConfirmLimpar, setShowConfirmLimpar] = useState(false)
-  const [newItem, setNewItem] = useState({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 })
-  const [mov, setMov] = useState<MovItem>({ data: new Date().toISOString().split('T')[0], tipo: 'ENTRADA', sku_base: '', quantidade: 0, origem: '', observacao: '' })
-  const [msg, setMsg] = useState('')
+  const [items,    setItems]    = useState<Item[]>([])
+  const [loading,  setLoading]  = useState(true)
+  const [search,   setSearch]   = useState('')
+  const [editId,   setEditId]   = useState<string | null>(null)
+  const [editVals, setEditVals] = useState<Partial<Item>>({})
+  const [showAdd,  setShowAdd]  = useState(false)
+  const [showMov,  setShowMov]  = useState(false)
+  const [showDel,  setShowDel]  = useState(false)
   const [limpando, setLimpando] = useState(false)
+  const [toast,    setToast]    = useState('')
+  const [newItem,  setNewItem]  = useState({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 })
+  const [mov,      setMov]      = useState<Mov>({ data: new Date().toISOString().slice(0,10), tipo: 'ENTRADA', sku_base: '', quantidade: 0, observacao: '' })
 
-  useEffect(() => { loadData() }, [])
-  useEffect(() => {
-    const q = search.toLowerCase()
-    setFiltered(items.filter(i => i.produto?.toLowerCase().includes(q) || i.sku_base?.toLowerCase().includes(q)))
-  }, [search, items])
+  useEffect(() => { load() }, [])
 
-  async function loadData() {
+  async function load() {
     setLoading(true)
     const { data } = await supabase.from('estoque').select('*').order('produto')
     setItems(data || [])
-    setFiltered(data || [])
     setLoading(false)
   }
 
-  async function handleSave(id: string) {
-    const { error } = await supabase.from('estoque').update(editValues).eq('id', id)
-    if (!error) { setEditingId(null); loadData() }
+  function toast3(msg: string) { setToast(msg); setTimeout(() => setToast(''), 3000) }
+
+  async function saveEdit(id: string) {
+    await supabase.from('estoque').update(editVals).eq('id', id)
+    setEditId(null); load()
   }
 
-  async function handleAdd() {
-    const { error } = await supabase.from('estoque').insert(newItem)
-    if (!error) { setShowAdd(false); setNewItem({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 }); loadData() }
+  async function addItem() {
+    await supabase.from('estoque').insert(newItem)
+    setShowAdd(false)
+    setNewItem({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 })
+    load()
   }
 
-  async function handleMovimentacao() {
+  async function doMov() {
     const item = items.find(i => i.sku_base === mov.sku_base)
     if (!item) return
-    const delta = mov.tipo === 'ENTRADA' ? mov.quantidade : mov.quantidade - item.estoque_atual
-    const novoEstoque = mov.tipo === 'AJUSTE' ? mov.quantidade : item.estoque_atual + delta
-    await supabase.from('estoque').update({ estoque_atual: novoEstoque }).eq('id', item.id)
-    await supabase.from('movimentacoes').insert({
-      data: mov.data, tipo: mov.tipo, sku_base: mov.sku_base,
-      quantidade: Math.abs(delta), origem: mov.origem || 'Manual', observacao: mov.observacao,
-    })
-    showMsg('Movimentação registrada!')
-    setShowMov(false)
-    loadData()
+    const novoEst = mov.tipo === 'AJUSTE' ? mov.quantidade : item.estoque_atual + mov.quantidade
+    const delta   = Math.abs(novoEst - item.estoque_atual)
+    await supabase.from('estoque').update({ estoque_atual: novoEst }).eq('id', item.id)
+    await supabase.from('movimentacoes').insert({ data: mov.data, tipo: mov.tipo, sku_base: mov.sku_base, quantidade: delta, origem: 'Manual', observacao: mov.observacao })
+    toast3('Movimentação registrada!')
+    setShowMov(false); load()
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('Excluir este item?')) return
-    await supabase.from('estoque').delete().eq('id', id)
-    loadData()
+  async function delItem(id: string) {
+    if (!confirm('Excluir produto?')) return
+    await supabase.from('estoque').delete().eq('id', id); load()
   }
 
-  async function handleLimparTudo() {
+  async function limparTudo() {
     setLimpando(true)
     await supabase.from('movimentacoes').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    // Zera o estoque atual (não deleta os produtos)
-    for (const item of items) {
-      await supabase.from('estoque').update({ estoque_atual: 0 }).eq('id', item.id)
-    }
-    setShowConfirmLimpar(false)
-    setLimpando(false)
-    showMsg('Estoque zerado e movimentações apagadas.')
-    loadData()
+    for (const i of items) await supabase.from('estoque').update({ estoque_atual: 0 }).eq('id', i.id)
+    setShowDel(false); setLimpando(false)
+    toast3('Estoque zerado.'); load()
   }
 
-  function showMsg(text: string) {
-    setMsg(text)
-    setTimeout(() => setMsg(''), 3500)
-  }
-
-  const totalItens = items.reduce((s, i) => s + i.estoque_atual, 0)
+  const lista = items.filter(i => {
+    const q = search.toLowerCase()
+    return i.produto?.toLowerCase().includes(q) || i.sku_base?.toLowerCase().includes(q)
+  })
   const alertas = items.filter(i => i.estoque_atual <= i.estoque_minimo).length
+  const total   = items.reduce((s, i) => s + i.estoque_atual, 0)
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+      <div style={{ width: 36, height: 36, border: '2px solid #1e1e2c', borderTop: '2px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+    <div style={S.page}>
+      {/* HEADER */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         <div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Estoque</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {items.length} produtos · {totalItens} unidades · {alertas} alertas
-          </p>
+          <h2 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📦 Estoque</h2>
+          <p style={{ margin: 0, fontSize: 12, color: '#55556a' }}>{items.length} produtos · {total} unidades · {alertas} {alertas === 1 ? 'alerta' : 'alertas'}</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setShowMov(true)} className="btn-secondary"><RefreshCw className="w-4 h-4" /> Movimentação</button>
-          <button onClick={() => exportToExcel(filtered.map(i => ({
-            'SKU Base': i.sku_base, 'Produto': i.produto, 'Estoque Atual': i.estoque_atual,
-            'Estoque Mínimo': i.estoque_minimo, 'Status': i.estoque_atual <= i.estoque_minimo ? 'BAIXO' : 'OK'
-          })), 'estoque')} className="btn-secondary"><Download className="w-4 h-4" /> Excel</button>
-          <button onClick={() => exportToPDF('Relatório de Estoque', [
-            { header: 'SKU Base', dataKey: 'sku_base' }, { header: 'Produto', dataKey: 'produto' },
-            { header: 'Estoque Atual', dataKey: 'estoque_atual' }, { header: 'Mínimo', dataKey: 'estoque_minimo' },
-          ], filtered, 'estoque')} className="btn-secondary"><FileText className="w-4 h-4" /> PDF</button>
-          <button onClick={() => setShowConfirmLimpar(true)} className="btn-secondary"
-            style={{ color: 'var(--danger)', borderColor: 'rgba(255,61,113,0.3)' }}>
-            <Trash2 className="w-4 h-4" /> Limpar Estoque
-          </button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary"><Plus className="w-4 h-4" /> Novo Produto</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowMov(true)} style={S.btnSm}>🔄 Movimentação</button>
+          <button onClick={() => setShowDel(true)} style={S.btnDanger}>🗑️ Limpar Estoque</button>
+          <button onClick={() => setShowAdd(true)} style={S.btn}>+ Novo Produto</button>
         </div>
       </div>
 
-      {msg && (
-        <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(0,214,143,0.1)', color: 'var(--success)', border: '1px solid rgba(0,214,143,0.2)' }}>
-          {msg}
-        </div>
-      )}
-
-      <div className="relative max-w-xs">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-        <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-10" placeholder="Buscar produto ou SKU..." />
+      {/* BUSCA */}
+      <div style={{ marginBottom: 16 }}>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="🔍 Buscar produto ou SKU..."
+          style={{ ...S.inp, maxWidth: 320 }} />
       </div>
 
-      <div className="table-container">
-        <div className="grid grid-cols-5 table-header">
-          <span>SKU Base</span><span>Produto</span>
-          <span className="text-center">Estoque Atual</span><span className="text-center">Mínimo</span>
-          <span className="text-center">Ações</span>
+      {/* TABELA */}
+      <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['SKU Base', 'Produto', 'Estoque Atual', 'Mínimo', 'Ações'].map(h => (
+                  <th key={h} style={S.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {lista.length === 0 ? (
+                <tr><td colSpan={5} style={{ ...S.td, textAlign: 'center', padding: '40px', color: '#55556a' }}>Nenhum produto encontrado</td></tr>
+              ) : lista.map(item => {
+                const low    = item.estoque_atual <= item.estoque_minimo
+                const isEdit = editId === item.id
+                return (
+                  <tr key={item.id} style={{ borderLeft: `3px solid ${low ? '#f59e0b' : 'transparent'}` }}>
+                    <td style={S.td}><span style={{ color: '#ff6600', fontWeight: 600 }}>{item.sku_base}</span></td>
+                    <td style={S.td}>
+                      {isEdit
+                        ? <input value={editVals.produto || ''} onChange={e => setEditVals({ ...editVals, produto: e.target.value })} style={{ ...S.inp, width: 180 }} />
+                        : <span style={{ fontWeight: 500 }}>{item.produto}</span>}
+                    </td>
+                    <td style={{ ...S.td, textAlign: 'center' }}>
+                      {isEdit
+                        ? <input type="number" value={editVals.estoque_atual ?? ''} onChange={e => setEditVals({ ...editVals, estoque_atual: +e.target.value })} style={{ ...S.inp, width: 80, textAlign: 'center' }} />
+                        : <span style={{ background: low ? '#f59e0b22' : '#22c55e22', color: low ? '#f59e0b' : '#22c55e', border: `1px solid ${low ? '#f59e0b44' : '#22c55e44'}`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>{item.estoque_atual} un</span>}
+                    </td>
+                    <td style={{ ...S.td, textAlign: 'center', color: '#55556a' }}>
+                      {isEdit
+                        ? <input type="number" value={editVals.estoque_minimo ?? ''} onChange={e => setEditVals({ ...editVals, estoque_minimo: +e.target.value })} style={{ ...S.inp, width: 80, textAlign: 'center' }} />
+                        : `${item.estoque_minimo} un`}
+                    </td>
+                    <td style={{ ...S.td, textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                        {isEdit ? (
+                          <>
+                            <button onClick={() => saveEdit(item.id)} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>✓ Salvar</button>
+                            <button onClick={() => setEditId(null)} style={{ ...S.btnGhost, padding: '5px 10px' }}>✕</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditId(item.id); setEditVals(item) }} style={{ ...S.btnGhost, padding: '5px 10px', fontSize: 13 }}>✏️</button>
+                            <button onClick={() => delItem(item.id)} style={{ background: '#ef444412', color: '#ef4444', border: '1px solid #ef444425', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
-        {loading ? (
-          <div className="text-center py-12" style={{ color: 'var(--text-secondary)' }}>Carregando...</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12"><Package className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p style={{ color: 'var(--text-secondary)' }}>Nenhum produto no estoque</p></div>
-        ) : filtered.map(item => {
-          const isLow = item.estoque_atual <= item.estoque_minimo
-          const isEdit = editingId === item.id
-          return (
-            <div key={item.id} className="grid grid-cols-5 table-row items-center"
-              style={{ borderLeft: isLow ? '3px solid var(--warning)' : '3px solid transparent' }}>
-              <span className="font-mono text-sm" style={{ color: 'var(--shopee-primary)' }}>{item.sku_base}</span>
-              {isEdit ? (
-                <input value={editValues.produto || ''} onChange={e => setEditValues({ ...editValues, produto: e.target.value })} className="input-field text-sm" />
-              ) : <span className="font-medium">{item.produto}</span>}
-              {isEdit ? (
-                <input type="number" value={editValues.estoque_atual ?? ''} onChange={e => setEditValues({ ...editValues, estoque_atual: +e.target.value })} className="input-field text-sm text-center" />
-              ) : <span className="text-center"><span className={isLow ? 'badge-warning' : 'badge-success'}>{item.estoque_atual} un</span></span>}
-              {isEdit ? (
-                <input type="number" value={editValues.estoque_minimo ?? ''} onChange={e => setEditValues({ ...editValues, estoque_minimo: +e.target.value })} className="input-field text-sm text-center" />
-              ) : <span className="text-center text-sm" style={{ color: 'var(--text-secondary)' }}>{item.estoque_minimo} un</span>}
-              <div className="flex items-center justify-center gap-2">
-                {isEdit ? (
-                  <>
-                    <button onClick={() => handleSave(item.id)} className="p-1.5 rounded-lg" style={{ background: 'rgba(0,214,143,0.1)', color: 'var(--success)' }}><Save className="w-4 h-4" /></button>
-                    <button onClick={() => setEditingId(null)} className="p-1.5 rounded-lg" style={{ background: 'var(--bg-hover)' }}><X className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} /></button>
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => { setEditingId(item.id); setEditValues(item) }} className="p-1.5 rounded-lg" style={{ background: 'var(--bg-hover)' }}><Edit3 className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} /></button>
-                    <button onClick={() => handleDelete(item.id)} className="p-1.5 rounded-lg" style={{ background: 'rgba(255,61,113,0.05)' }}><X className="w-4 h-4" style={{ color: 'var(--danger)' }} /></button>
-                  </>
-                )}
-              </div>
-            </div>
-          )
-        })}
       </div>
+
+      {/* Toast */}
+      {toast && <div style={{ position: 'fixed', bottom: 28, right: 28, background: '#16a34a', color: '#fff', padding: '12px 22px', borderRadius: 10, fontWeight: 700, fontSize: 13, zIndex: 9999 }}>✅ {toast}</div>}
 
       {/* Modal Add */}
       {showAdd && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="card w-full max-w-md" style={{ padding: '32px' }}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-bold text-lg">Novo Produto</h2>
-              <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} /></button>
-            </div>
-            <div className="space-y-3">
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>SKU Base</label>
-                <input value={newItem.sku_base} onChange={e => setNewItem({ ...newItem, sku_base: e.target.value })} className="input-field" placeholder="Ex: FORMA" /></div>
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Nome do Produto</label>
-                <input value={newItem.produto} onChange={e => setNewItem({ ...newItem, produto: e.target.value })} className="input-field" placeholder="Ex: Forma de Gelo" /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Estoque Atual</label>
-                  <input type="number" value={newItem.estoque_atual} onChange={e => setNewItem({ ...newItem, estoque_atual: +e.target.value })} className="input-field" /></div>
-                <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Estoque Mínimo</label>
-                  <input type="number" value={newItem.estoque_minimo} onChange={e => setNewItem({ ...newItem, estoque_minimo: +e.target.value })} className="input-field" /></div>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAdd(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleAdd} className="btn-primary flex-1">Adicionar</button>
+        <Modal onClose={() => setShowAdd(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>+ Novo Produto</h3>
+            <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 18 }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={S.label}>SKU Base</label><input value={newItem.sku_base} onChange={e => setNewItem({ ...newItem, sku_base: e.target.value })} placeholder="Ex: FORMA" style={S.inp} /></div>
+            <div><label style={S.label}>Nome do Produto</label><input value={newItem.produto} onChange={e => setNewItem({ ...newItem, produto: e.target.value })} placeholder="Ex: Forma Air Fryer" style={S.inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={S.label}>Estoque Atual</label><input type="number" value={newItem.estoque_atual} onChange={e => setNewItem({ ...newItem, estoque_atual: +e.target.value })} style={S.inp} /></div>
+              <div><label style={S.label}>Estoque Mínimo</label><input type="number" value={newItem.estoque_minimo} onChange={e => setNewItem({ ...newItem, estoque_minimo: +e.target.value })} style={S.inp} /></div>
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+            <button onClick={() => setShowAdd(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
+            <button onClick={addItem} style={{ ...S.btn, flex: 1 }}>Adicionar</button>
+          </div>
+        </Modal>
       )}
 
       {/* Modal Movimentação */}
       {showMov && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="card w-full max-w-md" style={{ padding: '32px' }}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-bold text-lg">Registrar Movimentação</h2>
-              <button onClick={() => setShowMov(false)}><X className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} /></button>
+        <Modal onClose={() => setShowMov(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>🔄 Registrar Movimentação</h3>
+            <button onClick={() => setShowMov(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 18 }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={S.label}>Tipo</label>
+              <select value={mov.tipo} onChange={e => setMov({ ...mov, tipo: e.target.value as any })} style={S.inp}>
+                <option value="ENTRADA">Entrada</option>
+                <option value="AJUSTE">Ajuste de Estoque</option>
+              </select>
             </div>
-            <div className="space-y-3">
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Tipo</label>
-                <select value={mov.tipo} onChange={e => setMov({ ...mov, tipo: e.target.value as 'ENTRADA' | 'AJUSTE' })} className="input-field">
-                  <option value="ENTRADA">Entrada</option>
-                  <option value="AJUSTE">Ajuste de Estoque</option>
-                </select></div>
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Produto (SKU Base)</label>
-                <select value={mov.sku_base} onChange={e => setMov({ ...mov, sku_base: e.target.value })} className="input-field">
-                  <option value="">Selecione...</option>
-                  {items.map(i => <option key={i.id} value={i.sku_base}>{i.produto} ({i.sku_base})</option>)}
-                </select></div>
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>
-                {mov.tipo === 'AJUSTE' ? 'Novo Estoque Total' : 'Quantidade a Adicionar'}
-              </label>
-                <input type="number" value={mov.quantidade} onChange={e => setMov({ ...mov, quantidade: +e.target.value })} className="input-field" min="0" /></div>
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Observação</label>
-                <input value={mov.observacao} onChange={e => setMov({ ...mov, observacao: e.target.value })} className="input-field" placeholder="Ex: Compra fornecedor..." /></div>
+            <div><label style={S.label}>Produto</label>
+              <select value={mov.sku_base} onChange={e => setMov({ ...mov, sku_base: e.target.value })} style={S.inp}>
+                <option value="">Selecione...</option>
+                {items.map(i => <option key={i.id} value={i.sku_base}>{i.produto} ({i.sku_base})</option>)}
+              </select>
             </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowMov(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleMovimentacao} className="btn-primary flex-1">
-                <ArrowUp className="w-4 h-4" /> Registrar
-              </button>
+            <div><label style={S.label}>{mov.tipo === 'AJUSTE' ? 'Novo Estoque Total' : 'Quantidade a Adicionar'}</label>
+              <input type="number" value={mov.quantidade} onChange={e => setMov({ ...mov, quantidade: +e.target.value })} style={S.inp} min="0" />
+            </div>
+            <div><label style={S.label}>Observação</label>
+              <input value={mov.observacao} onChange={e => setMov({ ...mov, observacao: e.target.value })} placeholder="Ex: Compra fornecedor..." style={S.inp} />
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+            <button onClick={() => setShowMov(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
+            <button onClick={doMov} style={{ ...S.btn, flex: 1 }}>↑ Registrar</button>
+          </div>
+        </Modal>
       )}
 
       {/* Modal Limpar */}
-      {showConfirmLimpar && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="card w-full max-w-md" style={{ padding: '32px' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6" style={{ color: 'var(--danger)' }} />
-              <h2 className="font-bold text-lg">Zerar Estoque</h2>
-            </div>
-            <p className="text-sm mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Isso vai <strong>zerar</strong> o estoque atual de todos os produtos e apagar o histórico de movimentações. Os produtos não serão excluídos.
-            </p>
-            <p className="text-xs mb-5" style={{ color: 'var(--danger)' }}>Esta ação não pode ser desfeita.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowConfirmLimpar(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleLimparTudo} disabled={limpando} className="btn-primary flex-1" style={{ background: 'var(--danger)' }}>
-                {limpando ? 'Zerando...' : 'Confirmar'}
-              </button>
-            </div>
+      {showDel && (
+        <Modal onClose={() => setShowDel(false)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <span style={{ fontSize: 22 }}>⚠️</span>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>Zerar Estoque</h3>
           </div>
-        </div>
+          <p style={{ fontSize: 13, color: '#9090aa', marginBottom: 8 }}>Isso vai <strong style={{ color: '#e2e2f0' }}>zerar</strong> o estoque atual de todos os produtos e apagar o histórico de movimentações. Os produtos não serão excluídos.</p>
+          <p style={{ fontSize: 12, color: '#ef4444', marginBottom: 20 }}>Esta ação não pode ser desfeita.</p>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => setShowDel(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
+            <button onClick={limparTudo} disabled={limpando} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13, flex: 1 }}>
+              {limpando ? 'Zerando...' : 'Confirmar'}
+            </button>
+          </div>
+        </Modal>
       )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
