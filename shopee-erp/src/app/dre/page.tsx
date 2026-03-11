@@ -38,6 +38,8 @@ function StatusBadge({ v }: { v: number }) {
 export default function DREPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
+  const [skuMap,     setSkuMap]     = useState<any[]>([])
+  const [estoque,    setEstoque]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
@@ -50,13 +52,27 @@ export default function DREPage() {
 
   async function loadData() {
     setLoading(true)
-    const [finRes, adsRes] = await Promise.all([
+    const [finRes, adsRes, mapRes, estRes] = await Promise.all([
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('ads').select('*').order('data', { ascending: false }),
+      supabase.from('sku_map').select('*'),
+      supabase.from('estoque').select('*'),
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
+    setSkuMap(mapRes.data || [])
+    setEstoque(estRes.data || [])
     setLoading(false)
+  }
+
+  function calcCustoProd(skuVendido: string, quantidade: number): number {
+    if (!skuVendido) return 0
+    const comps = skuMap.filter(m => m.sku_venda === skuVendido)
+    if (!comps.length) return 0
+    return comps.reduce((t, c) => {
+      const prod = estoque.find(e => e.sku_base === c.sku_base)
+      return t + ((prod?.custo || 0) + (prod?.custo_embalagem || 0)) * (c.quantidade || 1) * quantidade
+    }, 0)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
@@ -89,7 +105,11 @@ export default function DREPage() {
         const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
         return s + ts + tf
       }, 0)
-      const cprod = lp.reduce((s, f) => s + (f.custo_produto || 0), 0)
+      const cprod = lp.reduce((s, f) => {
+        const sku = f.sku_vendido || f.sku || ''
+        const calc = calcCustoProd(sku, f.quantidade || 1)
+        return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
+      }, 0)
       const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
       const imp   = rec * imposto
       const lucOp = rec - taxas - cprod - cemb - imp
@@ -114,7 +134,11 @@ export default function DREPage() {
           return s + ts + tf
         }, 0)
         const i2    = r2 * imposto
-        const cp2   = lf.reduce((s, f) => s + (f.custo_produto || 0), 0)
+        const cp2   = lf.reduce((s, f) => {
+          const sku = f.sku_vendido || f.sku || ''
+          const calc = calcCustoProd(sku, f.quantidade || 1)
+          return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
+        }, 0)
         const ce2   = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
         const mc2   = r2 - t2 - cp2 - ce2
         const lo2   = mc2 - i2
@@ -124,7 +148,7 @@ export default function DREPage() {
 
       return { data, loja, rec, taxas, cprod, cemb, imp, mc, mcPct, lucOp, gads, ll, peds, margem: rec > 0 ? ll / rec : 0, porLoja }
     })
-  }, [finF, adsF, imposto, modo])
+  }, [finF, adsF, skuMap, estoque, imposto, modo])
 
   const tot = useMemo(() => {
     const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
