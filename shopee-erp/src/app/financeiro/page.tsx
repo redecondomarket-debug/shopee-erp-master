@@ -74,75 +74,86 @@ function calcLinha(recBruta: number, custoProd: number, custoEmb: number, impost
   return { taxaShopee, taxaFixa, imp, custoTotal, lucroOp, margem }
 }
 
-// ─── COLUNAS EXCEL SHOPEE (índices confirmados pelo usuário) ──────────────────
-// Col 1  (0) = ID do pedido
-// Col 2  (1) = Status do pedido
-// Col 11 (10)= Data de criação do pedido
-// Col 13 (12)= Nº de referência do SKU principal
-// Col 14 (13)= Nome do Produto
-// Col 15 (14)= Número de referência SKU  ← SKU de venda
-// Col 17 (16)= Preço original
-// Col 18 (17)= Preço acordado
-// Col 19 (18)= Quantidade
-// Col 38 (37)= Valor Total
-// Col 43 (42)= Taxa de comissão bruta
-// Col 46 (45)= Taxa de serviço líquida
-// Col 47 (46)= Total global  ← valor líquido
-// Col 63 (62)= LOJA  ← adicionada manualmente
-function parseExcelShopee(rows: any[][]): any[] {
-  return rows.map(r => {
-    const numPedido  = String(r[0]  || '')
-    const status     = String(r[1]  || '')
-    const dataRaw    = r[10] || ''
-    const skuPrinc   = String(r[12] || '')
-    const nomeProd   = String(r[13] || '')
-    const sku        = String(r[14] || r[12] || '').trim()
-    const precoOrig  = parseFloat(String(r[16] || '0').replace(',', '.')) || 0
-    const precoAcord = parseFloat(String(r[17] || '0').replace(',', '.')) || 0
-    const quantidade = parseInt(String(r[18] || '1')) || 1
-    const valorTotal = parseFloat(String(r[37] || '0').replace(',', '.')) || 0
-    const taxaComiss = parseFloat(String(r[42] || '0').replace(',', '.')) || 0
-    const taxaServLiq= parseFloat(String(r[45] || '0').replace(',', '.')) || 0
-    const totalGlobal= parseFloat(String(r[46] || '0').replace(',', '.')) || 0
-    const loja       = String(r[62] || '').trim().toUpperCase() || LOJAS[0]
+// ─── PARSER SHOPEE — lê por NOME de coluna (não por índice) ──────────────────
+// CORREÇÃO 1: sheet_to_json sem header:1 → cada linha é objeto keyed pelo cabeçalho
+// CORREÇÃO 2: usa "Agreed Price" como receita real (não "Original Price")
+// CORREÇÃO 3: usa taxas reais da planilha ("Shopee Commission" + "Shopee Fee")
+function parseShopeeRow(row: Record<string, any>): any | null {
+  // ── Pedido e status ───────────────────────────────────────────────────────
+  const numPedido = String(row['Order ID'] || row['No. Pesanan'] || '').trim()
+  const status    = String(row['Order Status'] || row['Status Pesanan'] || '').trim()
 
-    // Converter data para YYYY-MM-DD
-    let data = ''
-    if (dataRaw) {
-      const s = String(dataRaw)
-      // formato DD/MM/YYYY ou YYYY-MM-DD ou Excel serial
-      if (/\d{4}-\d{2}-\d{2}/.test(s)) {
-        data = s.slice(0, 10)
-      } else if (/\d{2}\/\d{2}\/\d{4}/.test(s)) {
-        const [d, m, y] = s.split('/')
-        data = `${y}-${m}-${d}`
-      } else if (!isNaN(Number(s))) {
-        // Excel serial date
-        const dt = new Date(Math.round((Number(s) - 25569) * 86400 * 1000))
-        data = dt.toISOString().slice(0, 10)
-      }
+  // Filtrar apenas pedidos concluídos/enviados
+  const statusOk = ['Completed', 'Concluído', 'Pedido concluído', 'Shipped', 'Enviado']
+  const statusUpper = status.toUpperCase()
+  const valido = statusOk.some(s => statusUpper.includes(s.toUpperCase()))
+  if (!valido || !numPedido) return null
+
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const dataRaw = row['Order Creation Date'] || row['Tanggal Pembuatan Pesanan'] || ''
+  let data = ''
+  if (dataRaw) {
+    const s = String(dataRaw).trim()
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+      data = s.slice(0, 10)
+    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
+      const [d, m, y] = s.split('/')
+      data = `${y}-${m}-${d}`
+    } else if (/^\d{2}-\d{2}-\d{4}/.test(s)) {
+      const [d, m, y] = s.split('-')
+      data = `${y}-${m}-${d}`
+    } else if (!isNaN(Number(s)) && Number(s) > 10000) {
+      // Excel serial date
+      const dt = new Date(Math.round((Number(s) - 25569) * 86400 * 1000))
+      data = dt.toISOString().slice(0, 10)
     }
+  }
+  if (!data) return null
 
-    const recBruta = precoAcord > 0 ? precoAcord * quantidade : valorTotal
+  // ── Produto e SKU ─────────────────────────────────────────────────────────
+  const nomeProd  = String(row['Product Name']   || row['Nama Produk']     || '').trim()
+  const skuVenda  = String(row['Seller SKU']     || row['SKU Referensi']   || row['SKU'] || '').trim()
+  const skuPrinc  = String(row['SKU Reference No.'] || skuVenda).trim()
 
-    return {
-      numero_pedido: numPedido,
-      status,
-      data,
-      loja: LOJAS.find(l => loja.includes(l.split(' ')[0])) || loja || LOJAS[0],
-      sku,
-      sku_principal: skuPrinc,
-      nome_produto: nomeProd,
-      quantidade,
-      preco_unitario: precoAcord || precoOrig,
-      valor_bruto: recBruta,
-      valor_liquido: totalGlobal || (recBruta - taxaComiss - Math.abs(taxaServLiq)),
-      taxa_shopee: taxaComiss,
-      taxa_servico: taxaServLiq,
-      custo_produto: 0,
-      custo_embalagem: 0,
-    }
-  }).filter(r => r.numero_pedido && r.data)
+  // ── Quantidade ────────────────────────────────────────────────────────────
+  const quantidade = parseInt(String(row['Quantity'] || row['Jumlah'] || '1')) || 1
+
+  // ── CORREÇÃO 2: Usar Agreed Price como receita real ───────────────────────
+  const num = (v: any) => parseFloat(String(v || '0').replace(/[^0-9.,\-]/g, '').replace(',', '.')) || 0
+  const precoAcordado  = num(row['Agreed Price']    || row['Harga Kesepakatan'])
+  const precoOriginal  = num(row['Original Price']  || row['Harga Asli'])        // apenas para exibição
+  const precoUnitario  = precoAcordado > 0 ? precoAcordado : precoOriginal
+  const valorBruto     = precoUnitario * quantidade  // ← Agreed Price × Qtd
+
+  // ── CORREÇÃO 3: Taxas reais da planilha — NÃO recalcular ─────────────────
+  const comissaoShopee = Math.abs(num(row['Shopee Commission'] || row['Komisi Shopee'] || 0))
+  const taxaShopee     = Math.abs(num(row['Shopee Fee']       || row['Biaya Shopee']   || 0))
+  const valorLiquido   = num(row['Final Amount Received'] || row['Total Diterima'] || 0)
+
+  // ── Loja (coluna adicionada manualmente pelo usuário) ─────────────────────
+  const lojaRaw = String(row['Store Name'] || row['Loja'] || row['LOJA'] || '').trim().toUpperCase()
+  const loja = LOJAS.find(l => lojaRaw.includes(l.split(' ')[0].toUpperCase())) || lojaRaw || LOJAS[0]
+
+  return {
+    numero_pedido:   numPedido,
+    status,
+    data,
+    loja,
+    sku_vendido:     skuVenda  || skuPrinc,
+    sku_principal:   skuPrinc,
+    nome_produto:    nomeProd,
+    quantidade,
+    preco_unitario:  precoUnitario,
+    preco_original:  precoOriginal,
+    receita_bruta:   valorBruto,         // Agreed Price × Qtd
+    taxa_shopee:     comissaoShopee,     // Shopee Commission (real)
+    taxa_fixa:       taxaShopee,         // Shopee Fee (real)
+    valor_liquido:   valorLiquido,       // Final Amount Received (real)
+    custo_produto:   0,
+    custo_embalagem: 0,
+    imposto:         0,
+    lucro_operacional: 0,
+  }
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -177,31 +188,44 @@ export default function FinanceiroPage() {
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
 
-  // Importar Excel da Shopee
+  // Importar Excel da Shopee — CORREÇÃO 1: lê por nome de coluna
   async function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const buf  = await file.arrayBuffer()
-    const wb   = XLSX.read(buf, { type: 'array' })
-    const ws   = wb.Sheets[wb.SheetNames[0]]
-    const data = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: false })
-    // Pular cabeçalho (linha 0)
-    const linhas = (data as any[][]).slice(1).filter(r => r[0])
-    const parsed = parseExcelShopee(linhas)
-    if (!parsed.length) { showToast('Nenhum pedido válido encontrado', 'err'); return }
+    const buf = await file.arrayBuffer()
+    const wb  = XLSX.read(buf, { type: 'array' })
+    const ws  = wb.Sheets[wb.SheetNames[0]]
+
+    // sheet_to_json sem header:1 → cada linha é objeto { "Order ID": ..., "Agreed Price": ..., ... }
+    const jsonRows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { raw: false, defval: '' })
+
+    const parsed = jsonRows
+      .map(row => parseShopeeRow(row))
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+
+    if (!parsed.length) { showToast('Nenhum pedido válido encontrado. Verifique o arquivo e os status.', 'err'); return }
 
     setSaving(true)
-    // Upsert por numero_pedido + sku para evitar duplicatas
-    const { error } = await supabase.from('financeiro').upsert(
-      parsed.map(p => ({
+    // Calcula lucro operacional com imposto configurado antes de salvar
+    const comUpsert = parsed.map(p => {
+      const imp        = p.receita_bruta * imposto
+      const embCusto   = custoEmb || 0
+      const lucroOp    = p.receita_bruta - p.taxa_shopee - p.taxa_fixa - p.custo_produto - embCusto - imp
+      return {
         ...p,
-        valor_liquido: p.valor_liquido || (p.valor_bruto * (1 - TAXA_SHOPEE) - TAXA_FIXA),
-      })),
-      { onConflict: 'numero_pedido,sku' }
+        custo_embalagem:   embCusto,
+        imposto:           imp,
+        lucro_operacional: lucroOp,
+      }
+    })
+
+    const { error } = await supabase.from('financeiro').upsert(
+      comUpsert,
+      { onConflict: 'numero_pedido,sku_vendido' }
     )
     setSaving(false)
     if (error) { showToast('Erro ao salvar: ' + error.message, 'err'); return }
-    showToast(`${parsed.length} pedidos importados!`)
+    showToast(`✅ ${parsed.length} pedidos importados com sucesso!`)
     loadData()
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -245,18 +269,24 @@ export default function FinanceiroPage() {
     loadData()
   }
 
-  // Filtrar + calcular com lógica App.js
+  // Filtrar + calcular usando taxas REAIS do banco (não recalcular)
   const filtered = useMemo(() => rows.filter(r => {
     if (filterLoja !== 'Todas' && r.loja !== filterLoja) return false
     if (dateFrom && r.data < dateFrom) return false
     if (dateTo   && r.data > dateTo)   return false
     return true
   }).map(r => {
-    const recBruta = r.valor_bruto || 0
-    const cProd    = r.custo_produto    || 0
-    const cEmb     = (r.custo_embalagem || 0) + custoEmb
-    const calc     = calcLinha(recBruta, cProd, cEmb, imposto)
-    return { ...r, ...calc, recBruta }
+    // CORREÇÃO 3: usar taxas reais salvas no banco, não recalcular
+    const recBruta   = r.receita_bruta  || r.valor_bruto  || 0
+    const taxaShopee = r.taxa_shopee    || 0   // Shopee Commission (real da planilha)
+    const taxaFixa   = r.taxa_fixa      || 0   // Shopee Fee (real da planilha)
+    const cProd      = r.custo_produto  || 0
+    const cEmb       = (r.custo_embalagem || 0) + (custoEmb || 0)
+    const imp        = recBruta * imposto
+    const custoTotal = taxaShopee + taxaFixa + cProd + cEmb + imp
+    const lucroOp    = recBruta - custoTotal
+    const margem     = recBruta > 0 ? lucroOp / recBruta : 0
+    return { ...r, recBruta, taxaShopee, taxaFixa, custoProd: cProd, imp, custoTotal, lucroOp, margem }
   }), [rows, filterLoja, dateFrom, dateTo, imposto, custoEmb])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
@@ -385,7 +415,7 @@ export default function FinanceiroPage() {
             p.data,
             <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
             <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.numero_pedido}</span>,
-            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku}</span>,
+            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku_vendido || p.sku}</span>,
             <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{p.nome_produto}</span>,
             N(p.quantidade),
             R(p.preco_unitario || 0),
