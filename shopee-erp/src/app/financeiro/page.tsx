@@ -22,13 +22,13 @@ const N  = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
 
 // ─── UI ATOMS ─────────────────────────────────────────────────────────────────
 const S: Record<string, React.CSSProperties> = {
-  card:      { background: '#16161f', border: '1px solid #2a2a3a', borderRadius: 10, padding: 16 },
-  th:        { padding: '8px 12px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#888', letterSpacing: 0.8, textTransform: 'uppercase' as any, borderBottom: '1px solid #2a2a3a', whiteSpace: 'nowrap' as any },
-  td:        { padding: '7px 12px', fontSize: 12.5, borderBottom: '1px solid #1e1e2a', whiteSpace: 'nowrap' as any },
-  inp:       { background: '#0f0f13', border: '1px solid #2a2a3a', borderRadius: 6, padding: '7px 10px', color: '#e8e8f0', fontSize: 13, width: '100%', outline: 'none', boxSizing: 'border-box' as any },
-  btn:       { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
-  btnSm:     { background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 11 },
-  btnDanger: { background: '#ef444422', color: '#ef4444', border: '1px solid #ef444444', borderRadius: 5, padding: '4px 10px', cursor: 'pointer', fontWeight: 600, fontSize: 11 },
+  card:      { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:        { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:        { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:       { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
+  btn:       { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  btnSm:     { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  btnDanger: { background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
   label:     { fontSize: 11, color: '#888', marginBottom: 4, display: 'block', fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase' as any },
 }
 
@@ -332,16 +332,16 @@ export default function FinanceiroPage() {
   const totImp  = filtered.reduce((s, r) => s + r.imp, 0)
 
   if (loading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240 }}>
-      <div style={{ width: 40, height: 40, border: '3px solid #ff660033', borderTop: '3px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+      <div style={{ width: 36, height: 36, border: '2px solid #1e1e2c', borderTop: '2px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
     </div>
   )
 
   return (
     <div>
       {/* HEADER */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>💰 Financeiro — Pedidos Shopee</h2>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>💰 Financeiro — Pedidos Shopee</h2>
         <div style={{ flex: 1 }} />
         <button onClick={() => setShowCfg(!showCfg)} style={S.btnSm as any}>⚙️ Configurar</button>
         <button onClick={() => {
@@ -386,7 +386,7 @@ export default function FinanceiroPage() {
 
       {/* FORM MANUAL */}
       {showForm && (
-        <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ ...S.card, marginBottom: 20 }}>
           <div style={{ fontSize: 11, color: '#888', marginBottom: 10, fontWeight: 600 }}>+ ADICIONAR PEDIDO MANUALMENTE</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))', gap: 10 }}>
             {([
@@ -416,7 +416,7 @@ export default function FinanceiroPage() {
       )}
 
       {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={filterLoja} onChange={e => setFilterLoja(e.target.value)} style={{ ...S.inp, width: 'auto', fontSize: 12 } as any}>
           <option>Todas</option>{LOJAS.map(l => <option key={l}>{l}</option>)}
         </select>
