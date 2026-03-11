@@ -183,15 +183,15 @@ export default function DashboardPage() {
   })
 
   // Top SKUs
-  const skuMap: Record<string, any> = {}
+  const skuAgg: Record<string, any> = {}
   finF.forEach(f => {
-    const sku = f.sku || 'SEM SKU'
-    if (!skuMap[sku]) skuMap[sku] = { sku, nome: f.nome_produto || sku, rec: 0, lucro: 0, qtd: 0 }
-    skuMap[sku].rec   += f.valor_bruto   || 0
-    skuMap[sku].lucro += f.valor_liquido || 0
-    skuMap[sku].qtd   += f.quantidade    || 1
+    const sku = f.sku_vendido || f.sku || 'SEM SKU'
+    if (!skuAgg[sku]) skuAgg[sku] = { sku, nome: f.nome_produto || sku, rec: 0, lucro: 0, qtd: 0 }
+    skuAgg[sku].rec   += f.receita_bruta || f.valor_bruto   || 0
+    skuAgg[sku].lucro += f.lucro_operacional || f.valor_liquido || 0
+    skuAgg[sku].qtd   += f.quantidade    || 1
   })
-  const topSkus = Object.values(skuMap).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
+  const topSkus = Object.values(skuAgg).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
 
   // Chart por dia
   const byDay: Record<string, number> = {}
