@@ -1,232 +1,244 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { exportToExcel } from '@/lib/exports'
-import { Megaphone, Plus, X, Download, FileText, Search, Trash2, AlertTriangle } from 'lucide-react'
 
-type Ad = { id: string; data: string; loja: string; produto: string; investimento: number; vendas_geradas: number; roas: number }
+const R  = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
+const D  = (s: string) => { if (!s) return ''; const [y,m,d] = String(s).slice(0,10).split('-'); return d&&m&&y?`${d}/${m}/${y}`:s }
 
-const LOJAS = ['KL Market', 'Universo dos Achados', 'Mundo dos Achados']
+const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
+const LOJA_COLORS: Record<string, string> = {
+  'KL MARKET': '#ff6600', 'UNIVERSO DOS ACHADOS': '#0ea5e9', 'MUNDO DOS ACHADOS': '#a855f7',
+}
 
-function formatCurrency(val: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
+const S = {
+  page:     { padding: '20px 24px', width: '100%', boxSizing: 'border-box' as any },
+  card:     { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:       { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:       { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:      { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any, width: '100%' },
+  btn:      { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  btnSm:    { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  btnGhost: { background: 'transparent', color: '#9090aa', border: '1px solid #2a2a3a', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 500, fontSize: 12 },
+  btnDanger:{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  label:    { fontSize: 11, color: '#55556a', marginBottom: 5, display: 'block', fontWeight: 600, letterSpacing: 0.8, textTransform: 'uppercase' as any },
+}
+
+type Ad = { id: string; data: string; loja: string; produto: string; investimento: number; vendas_geradas: number; roas: number; gasto?: number }
+
+function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+      <div style={{ ...S.card, width: '100%', maxWidth: 480, padding: '28px 32px' }}>{children}</div>
+    </div>
+  )
 }
 
 export default function AdsPage() {
-  const [ads, setAds] = useState<Ad[]>([])
-  const [loading, setLoading] = useState(true)
-  const [lojaFilter, setLojaFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [search, setSearch] = useState('')
-  const [showAdd, setShowAdd] = useState(false)
-  const [showConfirmLimpar, setShowConfirmLimpar] = useState(false)
-  const [limpando, setLimpando] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [newAd, setNewAd] = useState({
-    data: new Date().toISOString().split('T')[0], loja: LOJAS[0], produto: '', investimento: 0, vendas_geradas: 0,
-  })
+  const [ads,       setAds]       = useState<Ad[]>([])
+  const [loading,   setLoading]   = useState(true)
+  const [lojaFil,   setLojaFil]   = useState('Todas')
+  const [dateFrom,  setDateFrom]  = useState('')
+  const [dateTo,    setDateTo]    = useState('')
+  const [showAdd,   setShowAdd]   = useState(false)
+  const [showDel,   setShowDel]   = useState(false)
+  const [limpando,  setLimpando]  = useState(false)
+  const [toast,     setToast]     = useState('')
+  const [newAd, setNewAd] = useState({ data: new Date().toISOString().slice(0,10), loja: LOJAS[0], produto: '', investimento: 0, vendas_geradas: 0 })
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { load() }, [])
 
-  async function loadData() {
+  async function load() {
     setLoading(true)
     const { data } = await supabase.from('ads').select('*').order('data', { ascending: false })
-    setAds((data || []).map(a => ({ ...a, roas: a.investimento > 0 ? a.vendas_geradas / a.investimento : 0 })))
+    setAds((data || []).map((a: any) => ({ ...a, roas: (a.investimento||a.gasto||0) > 0 ? a.vendas_geradas / (a.investimento||a.gasto||1) : 0 })))
     setLoading(false)
   }
 
-  async function handleAdd() {
-    const roas = newAd.investimento > 0 ? newAd.vendas_geradas / newAd.investimento : 0
-    const { error } = await supabase.from('ads').insert({ ...newAd, roas })
-    if (!error) { setShowAdd(false); loadData() }
+  async function addAd() {
+    const inv  = newAd.investimento
+    const roas = inv > 0 ? newAd.vendas_geradas / inv : 0
+    await supabase.from('ads').insert({ ...newAd, roas, gasto: inv })
+    setShowAdd(false); load()
   }
 
-  async function handleDelete(id: string) {
-    await supabase.from('ads').delete().eq('id', id)
-    loadData()
+  async function delAd(id: string) {
+    if (!confirm('Excluir registro?')) return
+    await supabase.from('ads').delete().eq('id', id); load()
   }
 
-  async function handleLimpar() {
+  async function limpar() {
     setLimpando(true)
-    let query = supabase.from('ads').delete().neq('id', '00000000-0000-0000-0000-000000000000')
-    if (lojaFilter) query = (query as any).eq('loja', lojaFilter)
-    if (dateFrom) query = (query as any).gte('data', dateFrom)
-    if (dateTo) query = (query as any).lte('data', dateTo)
-    await query
-    setShowConfirmLimpar(false)
-    setLimpando(false)
-    setMsg(`✅ Registros removidos.`)
-    setTimeout(() => setMsg(''), 3500)
-    loadData()
+    let q = supabase.from('ads').delete().neq('id', '00000000-0000-0000-0000-000000000000') as any
+    if (lojaFil !== 'Todas') q = q.eq('loja', lojaFil)
+    if (dateFrom) q = q.gte('data', dateFrom)
+    if (dateTo)   q = q.lte('data', dateTo)
+    await q
+    setShowDel(false); setLimpando(false)
+    setToast('Registros removidos.'); setTimeout(() => setToast(''), 3000)
+    load()
   }
-
-  const limparFiltros = () => { setLojaFilter(''); setDateFrom(''); setDateTo(''); setSearch('') }
-  const temFiltro = lojaFilter || dateFrom || dateTo || search
 
   const filtered = ads.filter(a => {
-    if (lojaFilter && a.loja !== lojaFilter) return false
+    if (lojaFil !== 'Todas' && a.loja !== lojaFil) return false
     if (dateFrom && a.data < dateFrom) return false
-    if (dateTo && a.data > dateTo) return false
-    if (search && !a.produto?.toLowerCase().includes(search.toLowerCase())) return false
+    if (dateTo   && a.data > dateTo)   return false
     return true
   })
 
-  const totalInvestimento = filtered.reduce((s, a) => s + (a.investimento || 0), 0)
+  const totalInv    = filtered.reduce((s, a) => s + (a.investimento || a.gasto || 0), 0)
   const totalVendas = filtered.reduce((s, a) => s + (a.vendas_geradas || 0), 0)
-  const roasGeral = totalInvestimento > 0 ? totalVendas / totalInvestimento : 0
+  const roasGeral   = totalInv > 0 ? totalVendas / totalInv : 0
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+      <div style={{ width: 36, height: 36, border: '2px solid #1e1e2c', borderTop: '2px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+    </div>
+  )
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+    <div style={S.page}>
+      {/* HEADER */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         <div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Shopee Ads</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{filtered.length} registros</p>
+          <h2 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📣 Shopee Ads</h2>
+          <p style={{ margin: 0, fontSize: 12, color: '#55556a' }}>{filtered.length} registros</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setShowConfirmLimpar(true)} className="btn-secondary"
-            style={{ color: 'var(--danger)', borderColor: 'rgba(255,61,113,0.3)' }}>
-            <Trash2 className="w-4 h-4" /> Limpar Período
-          </button>
-          <button onClick={() => exportToExcel(filtered.map(a => ({
-            'Data': a.data, 'Loja': a.loja, 'Produto': a.produto,
-            'Investimento': a.investimento, 'Vendas Geradas': a.vendas_geradas, 'ROAS': a.roas.toFixed(2),
-          })), 'ads')} className="btn-secondary"><Download className="w-4 h-4" /> Excel</button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary"><Plus className="w-4 h-4" /> Novo Anúncio</button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setShowDel(true)} style={S.btnDanger}>🗑️ Limpar Período</button>
+          <button onClick={() => setShowAdd(true)} style={S.btn}>+ Novo Anúncio</button>
         </div>
       </div>
 
-      {msg && (
-        <div className="p-3 rounded-lg text-sm" style={{ background: 'rgba(0,214,143,0.1)', color: 'var(--success)', border: '1px solid rgba(0,214,143,0.2)' }}>{msg}</div>
-      )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="stat-card">
-          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Total Investido</p>
-          <p className="text-2xl font-bold" style={{ color: '#ff3d71', fontFamily: 'var(--font-display)' }}>{formatCurrency(totalInvestimento)}</p>
-        </div>
-        <div className="stat-card">
-          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>Vendas Geradas</p>
-          <p className="text-2xl font-bold" style={{ color: 'var(--success)', fontFamily: 'var(--font-display)' }}>{formatCurrency(totalVendas)}</p>
-        </div>
-        <div className="stat-card">
-          <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-muted)' }}>ROAS Geral</p>
-          <p className="text-2xl font-bold" style={{ color: 'var(--info)', fontFamily: 'var(--font-display)' }}>{roasGeral.toFixed(2)}x</p>
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-muted)' }} />
-          <input value={search} onChange={e => setSearch(e.target.value)} className="input-field pl-9 w-44" placeholder="Produto..." />
-        </div>
-        <select value={lojaFilter} onChange={e => setLojaFilter(e.target.value)} className="input-field w-52">
-          <option value="">Todas as lojas</option>
-          {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
-        </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-field w-36" />
-        <span style={{ color: 'var(--text-muted)' }}>até</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-field w-36" />
-        {temFiltro && <button onClick={limparFiltros} className="btn-secondary"><X className="w-4 h-4" /> Limpar</button>}
-      </div>
-
-      {/* Table */}
-      <div className="table-container">
-        <div className="grid grid-cols-7 table-header">
-          <span>Data</span><span>Loja</span><span>Produto</span>
-          <span className="text-right">Investimento</span><span className="text-right">Vendas</span>
-          <span className="text-center">ROAS</span><span className="text-center">Ação</span>
-        </div>
-        {loading ? (
-          <div className="text-center py-12" style={{ color: 'var(--text-secondary)' }}>Carregando...</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12"><Megaphone className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p style={{ color: 'var(--text-secondary)' }}>Nenhum anúncio registrado</p></div>
-        ) : filtered.map(ad => (
-          <div key={ad.id} className="grid grid-cols-7 table-row items-center">
-            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>{ad.data}</span>
-            <span className="text-sm">{ad.loja?.split(' ')[0]}</span>
-            <span className="text-sm font-medium">{ad.produto}</span>
-            <span className="text-right text-sm" style={{ color: 'var(--danger)' }}>{formatCurrency(ad.investimento)}</span>
-            <span className="text-right text-sm" style={{ color: 'var(--success)' }}>{formatCurrency(ad.vendas_geradas)}</span>
-            <div className="flex justify-center">
-              <span className={ad.roas >= 3 ? 'badge-success' : ad.roas >= 1.5 ? 'badge-warning' : 'badge-danger'}>
-                {ad.roas.toFixed(2)}x
-              </span>
-            </div>
-            <div className="flex justify-center">
-              <button onClick={() => handleDelete(ad.id)} className="p-1 rounded" style={{ color: 'var(--text-muted)' }}>
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
+      {/* KPI CARDS */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+        {[
+          { label: 'Total Investido',  val: R(totalInv),    color: '#ef4444' },
+          { label: 'Vendas Geradas',   val: R(totalVendas), color: '#22c55e' },
+          { label: 'ROAS Geral',       val: `${roasGeral.toFixed(2)}x`, color: '#0ea5e9' },
+        ].map(k => (
+          <div key={k.label} style={{ ...S.card, borderTop: `3px solid ${k.color}22` }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>{k.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: k.color }}>{k.val}</div>
           </div>
         ))}
       </div>
 
+      {/* FILTROS */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {['Todas', ...LOJAS].map(l => {
+            const ativo = lojaFil === l
+            const cor   = LOJA_COLORS[l] || '#ff6600'
+            const label = l === 'Todas' ? 'Todas' : l === 'KL MARKET' ? 'KL' : l === 'UNIVERSO DOS ACHADOS' ? 'UNIVERSO' : 'MUNDO'
+            return (
+              <button key={l} onClick={() => setLojaFil(l)} style={{ background: ativo ? cor + '22' : 'transparent', border: `1px solid ${ativo ? cor : '#2a2a3a'}`, color: ativo ? cor : '#555', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontSize: 12, fontWeight: ativo ? 700 : 400 }}>{label}</button>
+            )
+          })}
+        </div>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 148 }} />
+        <span style={{ color: '#444', fontSize: 12 }}>até</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 148 }} />
+        {(dateFrom || dateTo) && <button onClick={() => { setDateFrom(''); setDateTo('') }} style={S.btnGhost}>✕ Limpar</button>}
+      </div>
+
+      {/* TABELA */}
+      <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Data', 'Loja', 'Produto/Campanha', 'Investimento', 'Vendas Geradas', 'ROAS', 'Ação'].map(h => (
+                  <th key={h} style={{ ...S.th, textAlign: h === 'Investimento' || h === 'Vendas Geradas' ? 'right' as any : S.th.textAlign }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center', padding: '40px', color: '#55556a' }}>Nenhum anúncio registrado</td></tr>
+              ) : filtered.map(ad => {
+                const inv  = ad.investimento || ad.gasto || 0
+                const roas = inv > 0 ? ad.vendas_geradas / inv : 0
+                const cor  = LOJA_COLORS[ad.loja] || '#ff6600'
+                return (
+                  <tr key={ad.id}>
+                    <td style={{ ...S.td, color: '#55556a' }}>{D(ad.data)}</td>
+                    <td style={S.td}><span style={{ color: cor, fontWeight: 600 }}>{ad.loja === 'KL MARKET' ? 'KL' : ad.loja === 'UNIVERSO DOS ACHADOS' ? 'UNIVERSO' : 'MUNDO'}</span></td>
+                    <td style={{ ...S.td, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis' }}>{ad.produto}</td>
+                    <td style={{ ...S.td, textAlign: 'right', color: '#ef4444' }}>{R(inv)}</td>
+                    <td style={{ ...S.td, textAlign: 'right', color: '#22c55e' }}>{R(ad.vendas_geradas)}</td>
+                    <td style={{ ...S.td, textAlign: 'center' }}>
+                      <span style={{ background: roas >= 3 ? '#22c55e22' : roas >= 1.5 ? '#f59e0b22' : '#ef444422', color: roas >= 3 ? '#22c55e' : roas >= 1.5 ? '#f59e0b' : '#ef4444', border: `1px solid ${roas >= 3 ? '#22c55e44' : roas >= 1.5 ? '#f59e0b44' : '#ef444444'}`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                        {roas.toFixed(2)}x
+                      </span>
+                    </td>
+                    <td style={{ ...S.td, textAlign: 'center' }}>
+                      <button onClick={() => delAd(ad.id)} style={{ background: '#ef444412', color: '#ef4444', border: '1px solid #ef444425', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Toast */}
+      {toast && <div style={{ position: 'fixed', bottom: 28, right: 28, background: '#16a34a', color: '#fff', padding: '12px 22px', borderRadius: 10, fontWeight: 700, fontSize: 13, zIndex: 9999 }}>✅ {toast}</div>}
+
       {/* Modal Add */}
       {showAdd && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="card w-full max-w-md" style={{ padding: '32px' }}>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-bold text-lg">Novo Registro de Ads</h2>
-              <button onClick={() => setShowAdd(false)}><X className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} /></button>
+        <Modal onClose={() => setShowAdd(false)}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>📣 Novo Registro de Ads</h3>
+            <button onClick={() => setShowAdd(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 18 }}>✕</button>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div><label style={S.label}>Data</label><input type="date" value={newAd.data} onChange={e => setNewAd({ ...newAd, data: e.target.value })} style={S.inp} /></div>
+            <div><label style={S.label}>Loja</label>
+              <select value={newAd.loja} onChange={e => setNewAd({ ...newAd, loja: e.target.value })} style={S.inp}>
+                {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
             </div>
-            <div className="space-y-3">
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Data</label>
-                <input type="date" value={newAd.data} onChange={e => setNewAd({ ...newAd, data: e.target.value })} className="input-field" /></div>
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Loja</label>
-                <select value={newAd.loja} onChange={e => setNewAd({ ...newAd, loja: e.target.value })} className="input-field">
-                  {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
-                </select></div>
-              <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Produto/Campanha</label>
-                <input value={newAd.produto} onChange={e => setNewAd({ ...newAd, produto: e.target.value })} className="input-field" placeholder="Nome da campanha" /></div>
-              <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Investimento (R$)</label>
-                  <input type="number" step="0.01" value={newAd.investimento} onChange={e => setNewAd({ ...newAd, investimento: +e.target.value })} className="input-field" /></div>
-                <div><label className="block text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>Vendas Geradas (R$)</label>
-                  <input type="number" step="0.01" value={newAd.vendas_geradas} onChange={e => setNewAd({ ...newAd, vendas_geradas: +e.target.value })} className="input-field" /></div>
-              </div>
-              <div className="p-3 rounded-lg" style={{ background: 'var(--bg-hover)', border: '1px solid var(--border)' }}>
-                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>ROAS: </span>
-                <span className="font-bold" style={{ color: 'var(--shopee-primary)' }}>
-                  {newAd.investimento > 0 ? (newAd.vendas_geradas / newAd.investimento).toFixed(2) : '0.00'}x
-                </span>
-              </div>
+            <div><label style={S.label}>Produto / Campanha</label><input value={newAd.produto} onChange={e => setNewAd({ ...newAd, produto: e.target.value })} placeholder="Nome da campanha" style={S.inp} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={S.label}>Investimento (R$)</label><input type="number" step="0.01" value={newAd.investimento} onChange={e => setNewAd({ ...newAd, investimento: +e.target.value })} style={S.inp} /></div>
+              <div><label style={S.label}>Vendas Geradas (R$)</label><input type="number" step="0.01" value={newAd.vendas_geradas} onChange={e => setNewAd({ ...newAd, vendas_geradas: +e.target.value })} style={S.inp} /></div>
             </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowAdd(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleAdd} className="btn-primary flex-1">Salvar</button>
+            <div style={{ background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
+              ROAS: <strong style={{ color: '#ff6600' }}>{newAd.investimento > 0 ? (newAd.vendas_geradas / newAd.investimento).toFixed(2) : '0.00'}x</strong>
             </div>
           </div>
-        </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 24 }}>
+            <button onClick={() => setShowAdd(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
+            <button onClick={addAd} style={{ ...S.btn, flex: 1 }}>Salvar</button>
+          </div>
+        </Modal>
       )}
 
       {/* Modal Limpar */}
-      {showConfirmLimpar && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <div className="card w-full max-w-md" style={{ padding: '32px' }}>
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="w-6 h-6" style={{ color: 'var(--danger)' }} />
-              <h2 className="font-bold text-lg">Limpar Registros de Ads</h2>
-            </div>
-            <div className="p-3 rounded-lg mb-4 text-sm space-y-1" style={{ background: 'var(--bg-hover)' }}>
-              {lojaFilter && <p>Loja: <strong>{lojaFilter}</strong></p>}
-              {dateFrom && <p>De: <strong>{dateFrom}</strong></p>}
-              {dateTo && <p>Até: <strong>{dateTo}</strong></p>}
-              {!lojaFilter && !dateFrom && !dateTo && <p style={{ color: 'var(--danger)' }}>⚠️ Sem filtro — TODOS os registros serão apagados!</p>}
-              <p style={{ color: 'var(--warning)' }}>Registros a remover: <strong>{filtered.length}</strong></p>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={() => setShowConfirmLimpar(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={handleLimpar} disabled={limpando} className="btn-primary flex-1" style={{ background: 'var(--danger)' }}>
-                {limpando ? 'Removendo...' : 'Confirmar'}
-              </button>
-            </div>
+      {showDel && (
+        <Modal onClose={() => setShowDel(false)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+            <span style={{ fontSize: 22 }}>⚠️</span>
+            <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>Limpar Registros de Ads</h3>
           </div>
-        </div>
+          <div style={{ background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '12px 16px', fontSize: 13, marginBottom: 16 }}>
+            {lojaFil !== 'Todas' && <p style={{ margin: '0 0 4px', color: '#9090aa' }}>Loja: <strong style={{ color: '#e2e2f0' }}>{lojaFil}</strong></p>}
+            {dateFrom && <p style={{ margin: '0 0 4px', color: '#9090aa' }}>De: <strong style={{ color: '#e2e2f0' }}>{D(dateFrom)}</strong></p>}
+            {dateTo   && <p style={{ margin: '0 0 4px', color: '#9090aa' }}>Até: <strong style={{ color: '#e2e2f0' }}>{D(dateTo)}</strong></p>}
+            {lojaFil === 'Todas' && !dateFrom && !dateTo && <p style={{ color: '#ef4444', margin: 0 }}>⚠️ Sem filtro — TODOS os registros serão apagados!</p>}
+            <p style={{ margin: '8px 0 0', color: '#f59e0b' }}>Registros: <strong>{filtered.length}</strong></p>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => setShowDel(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
+            <button onClick={limpar} disabled={limpando} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13, flex: 1 }}>
+              {limpando ? 'Removendo...' : 'Confirmar'}
+            </button>
+          </div>
+        </Modal>
       )}
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
