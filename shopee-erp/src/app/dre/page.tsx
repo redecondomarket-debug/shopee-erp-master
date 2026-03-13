@@ -10,7 +10,7 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA   = 4.05
+const TAXA_FIXA   = 4.00
 const DEFAULT_IMPOSTO = 0.06
 
 const D = (s: string) => { if (!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m && y ? `${d}/${m}/${y}` : s }
@@ -47,6 +47,7 @@ export default function DREPage() {
   const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
   const [expanded,   setExpanded]   = useState<string | null>(null)
   const [modo,       setModo]       = useState<'resumido' | 'porLoja'>('resumido')
+  const [periodo,    setPeriodo]    = useState('personalizado')
 
   useEffect(() => { loadData() }, [])
 
@@ -63,6 +64,17 @@ export default function DREPage() {
     setSkuMap(mapRes.data || [])
     setEstoque(estRes.data || [])
     setLoading(false)
+  }
+
+  function aplicarPeriodo(p: string) {
+    setPeriodo(p)
+    const hoje = new Date()
+    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    if (p === 'hoje') { setDateFrom(fmt(hoje)); setDateTo(fmt(hoje)) }
+    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate()-1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
+    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate()-6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate()-29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'tudo') { setDateFrom(''); setDateTo('') }
   }
 
   function calcCustoProd(skuVendido: string, quantidade: number): number {
@@ -100,15 +112,15 @@ export default function DREPage() {
         ? finF.filter(f => f.data === data)
         : finF.filter(f => f.data === data && f.loja === loja)
 
-      const rec   = lp.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+      const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
       const taxas = lp.reduce((s, f) => {
-        const rb = f.receita_bruta || f.valor_bruto || 0
-        const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
-        const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
+        const rb = f.valor_bruto || 0
+        const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : rb * TAXA_SHOPEE
+        const tf = TAXA_FIXA
         return s + ts + tf
       }, 0)
       const cprod = lp.reduce((s, f) => {
-        const sku = f.sku_vendido || f.sku || ''
+        const sku = f.sku || ''
         const calc = calcCustoProd(sku, f.quantidade || 1)
         return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
       }, 0)
@@ -120,7 +132,7 @@ export default function DREPage() {
         : adsF.filter(a => a.data === data && a.loja === loja)
       ).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
       const ll     = lucOp - gads
-      const peds   = new Set(lp.map(f => f.numero_pedido)).size
+      const peds   = new Set(lp.map(f => f.pedido)).size
 
       const mc     = rec - taxas - cprod - cemb   // MC = Receita - Custos Variáveis (sem imposto e ads)
       const mcPct  = rec > 0 ? mc / rec : 0
@@ -128,16 +140,16 @@ export default function DREPage() {
       // Por loja (para modo resumido expandido)
       const porLoja = LOJAS.map(l => {
         const lf    = finF.filter(f => f.data === data && f.loja === l)
-        const r2    = lf.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+        const r2    = lf.reduce((s, f) => s + (f.valor_bruto || 0), 0)
         const t2    = lf.reduce((s, f) => {
-          const rb = f.receita_bruta || f.valor_bruto || 0
-          const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
-          const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
+          const rb = f.valor_bruto || 0
+          const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : rb * TAXA_SHOPEE
+          const tf = TAXA_FIXA
           return s + ts + tf
         }, 0)
         const i2    = r2 * imposto
         const cp2   = lf.reduce((s, f) => {
-          const sku = f.sku_vendido || f.sku || ''
+          const sku = f.sku || ''
           const calc = calcCustoProd(sku, f.quantidade || 1)
           return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
         }, 0)
@@ -145,7 +157,7 @@ export default function DREPage() {
         const mc2   = r2 - t2 - cp2 - ce2
         const lo2   = mc2 - i2
         const g2    = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
-        return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.numero_pedido)).size }
+        return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.pedido)).size }
       })
 
       return { data, loja, rec, taxas, cprod, cemb, imp, mc, mcPct, lucOp, gads, ll, peds, margem: rec > 0 ? ll / rec : 0, porLoja }
@@ -188,16 +200,26 @@ export default function DREPage() {
       </div>
 
       {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select value={lojaFiltro} onChange={e => setLojaFiltro(e.target.value)} style={{ ...S.inp, width: 'auto', fontSize: 12 } as any}>
-          <option>Todas</option>{LOJAS.map(l => <option key={l}>{l}</option>)}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={lojaFiltro} onChange={e => setLojaFiltro(e.target.value)} style={{ ...S.inp, width: 200, fontSize: 12 } as any}>
+          <option value="Todas">Todas as lojas</option>
+          {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140 } as any} />
-        <span style={{ color: '#555', fontSize: 12 }}>até</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140 } as any} />
-        {(lojaFiltro !== 'Todas' || dateFrom || dateTo) && (
-          <button onClick={() => { setLojaFiltro('Todas'); setDateFrom(''); setDateTo('') }} style={S.btnSm as any}>✕ Limpar</button>
-        )}
+        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
+            background: periodo === p ? '#ff6600' : '#13131e',
+            color: periodo === p ? '#fff' : '#9090aa',
+            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
+            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
+          }}>
+            {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
+          </button>
+        ))}
+        {periodo === 'personalizado' && <>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
+          <span style={{ color: '#555', fontSize: 12 }}>até</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
+        </>}
       </div>
 
       {/* KPIs */}
