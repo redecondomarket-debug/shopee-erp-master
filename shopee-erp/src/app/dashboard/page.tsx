@@ -2,7 +2,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 
-// ─── CONSTANTS (idênticas ao App.js) ─────────────────────────────────────────
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 const LOJA_COLORS: Record<string, string> = {
   'KL MARKET': '#ff6600',
@@ -10,14 +9,12 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA = 4.05
+const TAXA_FIXA = 4.00
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
 const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
 
-// ─── UI ATOMS (idênticos ao App.js) ──────────────────────────────────────────
 const S: Record<string, React.CSSProperties> = {
   card:      { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
   th:        { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
@@ -28,11 +25,7 @@ const S: Record<string, React.CSSProperties> = {
 }
 
 function Badge({ children, color = '#ff6600' }: { children: React.ReactNode; color?: string }) {
-  return (
-    <span style={{ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>
-      {children}
-    </span>
-  )
+  return <span style={{ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>{children}</span>
 }
 function StatusBadge({ v }: { v: number }) {
   if (v >= 0.20) return <Badge color="#22c55e">▲ {P(v)}</Badge>
@@ -75,7 +68,7 @@ function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]
         <tbody>
           {rows.length === 0
             ? <tr><td colSpan={headers.length} style={{ ...S.td, color: '#555', textAlign: 'center', padding: 32 } as any}>{emptyMsg}</td></tr>
-            : rows.map((r, i) => <tr key={i} style={{ cursor: 'default' }}>{r.map((c, j) => <td key={j} style={S.td as any}>{c}</td>)}</tr>)
+            : rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} style={S.td as any}>{c}</td>)}</tr>)
           }
         </tbody>
       </table>
@@ -83,7 +76,6 @@ function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]
   )
 }
 
-// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
@@ -93,6 +85,7 @@ export default function DashboardPage() {
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
+  const [periodo,    setPeriodo]    = useState('personalizado')
 
   useEffect(() => { loadData() }, [])
 
@@ -111,16 +104,25 @@ export default function DashboardPage() {
     setLoading(false)
   }
 
+  function aplicarPeriodo(p: string) {
+    setPeriodo(p)
+    const hoje = new Date()
+    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    if (p === 'hoje') { setDateFrom(fmt(hoje)); setDateTo(fmt(hoje)) }
+    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate()-1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
+    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate()-6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate()-29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'tudo') { setDateFrom(''); setDateTo('') }
+  }
+
   function calcCustoProd(skuVendido: string, quantidade: number): number {
     if (!skuVendido) return 0
     const comps = skuMap.filter(m => m.sku_venda === skuVendido)
     if (!comps.length) return 0
-    const custoProd = comps.reduce((t, c) => {
+    return comps.reduce((t, c) => {
       const prod = estoque.find(e => e.sku_base === c.sku_base)
       return t + (prod?.custo || 0) * (c.quantidade || 1) * quantidade
     }, 0)
-    const prodPrincipal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
-    return custoProd + (prodPrincipal?.custo_embalagem || 0)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
@@ -137,73 +139,54 @@ export default function DashboardPage() {
     return true
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
-  // ── KPIs (lógica idêntica ao App.js) ──────────────────────────────────────
-  const totalRec   = finF.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+  const totalRec   = finF.reduce((s, f) => s + (f.valor_bruto || 0), 0)
   const totalTaxas = finF.reduce((s, f) => {
-    const rb = f.receita_bruta || f.valor_bruto || 0
-    const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
-    const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
-    return s + ts + tf
+    const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE
+    return s + ts + TAXA_FIXA
   }, 0)
-  const totalCprod = finF.reduce((s, f) => {
-    const sku = f.sku_vendido || f.sku || ''
-    const calc = calcCustoProd(sku, f.quantidade || 1)
-    return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
-  }, 0)
-  const totalCemb  = finF.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
-  const totalMC    = totalRec - totalTaxas - totalCprod - totalCemb
+  const totalCprod = finF.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
+  const totalMC    = totalRec - totalTaxas - totalCprod
   const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
-  const totalLucOp = finF.reduce((s, f) => s + (f.lucro_operacional || f.valor_liquido || 0), 0)
-  const totalAds   = adsF.reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+  const totalImp   = totalRec * 0.06
+  const totalLucOp = totalMC - totalImp
+  const totalAds   = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
   const lucroLiq   = totalLucOp - totalAds
   const margemLiq  = totalRec > 0 ? lucroLiq / totalRec : 0
-  const roas       = totalAds  > 0 ? totalRec / totalAds  : 0
-  const pedSet     = new Set(finF.map(f => f.numero_pedido)).size
+  const roas       = totalAds > 0 ? totalRec / totalAds : 0
+  const pedSet     = new Set(finF.map(f => f.pedido)).size
   const ticket     = pedSet > 0 ? totalRec / pedSet : 0
 
-  // Resultado por loja (igual ao App.js)
   const porLoja = LOJAS.map(loja => {
     const lp    = finF.filter(f => f.loja === loja)
-    const rec   = lp.reduce((s, f) => s + (f.receita_bruta || f.valor_bruto || 0), 0)
+    const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
     const taxas = lp.reduce((s, f) => {
-      const rb = f.receita_bruta || f.valor_bruto || 0
-      const ts = (f.taxa_shopee && f.taxa_shopee > 0) ? f.taxa_shopee : rb * TAXA_SHOPEE
-      const tf = (f.taxa_fixa   && f.taxa_fixa   > 0) ? f.taxa_fixa   : TAXA_FIXA
-      return s + ts + tf
+      const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE
+      return s + ts + TAXA_FIXA
     }, 0)
-    const cprod = lp.reduce((s, f) => {
-      const sku = f.sku_vendido || f.sku || ''
-      const calc = calcCustoProd(sku, f.quantidade || 1)
-      return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
-    }, 0)
-    const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
-    const mc    = rec - taxas - cprod - cemb
-    const lucOp = lp.reduce((s, f) => s + (f.lucro_operacional || f.valor_liquido || 0), 0)
-    const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+    const cprod = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
+    const mc    = rec - taxas - cprod
+    const imp   = rec * 0.06
+    const lucOp = mc - imp
+    const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.investimento || 0), 0)
     const ll    = lucOp - gads
-    return { loja, rec, mc, mcPct: rec > 0 ? mc / rec : 0, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, peds: new Set(lp.map(f => f.numero_pedido)).size }
+    return { loja, rec, mc, mcPct: rec > 0 ? mc / rec : 0, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, peds: new Set(lp.map(f => f.pedido)).size }
   })
 
-  // Top SKUs
   const skuAgg: Record<string, any> = {}
   finF.forEach(f => {
-    const sku = f.sku_vendido || f.sku || 'SEM SKU'
-    if (!skuAgg[sku]) skuAgg[sku] = { sku, nome: f.nome_produto || sku, rec: 0, lucro: 0, qtd: 0 }
-    skuAgg[sku].rec   += f.receita_bruta || f.valor_bruto   || 0
-    skuAgg[sku].lucro += f.lucro_operacional || f.valor_liquido || 0
-    skuAgg[sku].qtd   += f.quantidade    || 1
+    const sku = f.sku || 'SEM SKU'
+    if (!skuAgg[sku]) skuAgg[sku] = { sku, nome: f.produto || sku, rec: 0, lucro: 0, qtd: 0 }
+    skuAgg[sku].rec   += f.valor_bruto || 0
+    skuAgg[sku].lucro += calcCustoProd(f.sku || '', f.quantidade || 1)
+    skuAgg[sku].qtd   += f.quantidade  || 1
   })
   const topSkus = Object.values(skuAgg).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
 
-  // Chart por dia
   const byDay: Record<string, number> = {}
   finF.forEach(f => { byDay[f.data] = (byDay[f.data] || 0) + (f.valor_bruto || 0) })
   const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
 
-  // Alertas de estoque
   const criticos = estoque.filter(e => (e.estoque_atual || 0) <= (e.estoque_minimo || 0))
-
-  const temFiltro = lojaFiltro !== 'Todas' || dateFrom || dateTo
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -214,7 +197,7 @@ export default function DashboardPage() {
   return (
     <div style={{ padding: "20px 24px", width: "100%", boxSizing: "border-box" }}>
       {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 4 }}>
           {['Todas', ...LOJAS].map(l => {
             const cor = LOJA_COLORS[l] || '#ff6600'
@@ -226,36 +209,43 @@ export default function DashboardPage() {
                 border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
                 color: ativo ? cor : '#555',
                 borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-                fontSize: 12, fontWeight: ativo ? 700 : 400, transition: 'all .15s'
+                fontSize: 12, fontWeight: ativo ? 700 : 400,
               }}>{label}</button>
             )
           })}
         </div>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
-        <span style={{ color: '#555', fontSize: 12 }}>até</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
-        {temFiltro && (
-          <button onClick={() => { setLojaFiltro('Todas'); setDateFrom(''); setDateTo('') }} style={S.btnSm as any}>
-            ✕ Limpar filtros
+        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
+            background: periodo === p ? '#ff6600' : '#13131e',
+            color: periodo === p ? '#fff' : '#9090aa',
+            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
+            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
+          }}>
+            {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
           </button>
-        )}
+        ))}
+        {periodo === 'personalizado' && <>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 150, padding: '5px 8px', fontSize: 12 } as any} />
+          <span style={{ color: '#555', fontSize: 12 }}>até</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150, padding: '5px 8px', fontSize: 12 } as any} />
+        </>}
         <button onClick={loadData} style={{ ...S.btnSm, marginLeft: 'auto' } as any}>🔄 Atualizar</button>
       </div>
 
-      {/* 6 KPIs (idêntico ao App.js) */}
+      {/* KPIs */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI icon="💰" label="Faturamento Total"        value={R(totalRec)}          color="#ff9933"                                                    sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
-        <KPI icon="📊" label="Margem de Contribuição"   value={`${R(totalMC)} · ${P(mcPct)}`} color={mcPct >= 0.30 ? '#a78bfa' : mcPct >= 0.15 ? '#f59e0b' : '#ef4444'} sub="Receita − Custos Variáveis" />
-        <KPI icon="✅" label="Lucro Líquido Real"       value={R(lucroLiq)}          color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'}                      sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
-        <KPI icon="📈" label="Margem Líquida"           value={P(margemLiq)}         color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
-        <KPI icon="⚡" label="ROAS Geral"               value={`${roas.toFixed(2)}x`} color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'} sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
-        <KPI icon="🛒" label="Total de Pedidos"         value={N(pedSet)}            color="#a78bfa"                                                    sub={`Ticket médio: ${R(ticket)}`} />
+        <KPI icon="💰" label="Faturamento Total"        value={R(totalRec)}                    color="#ff9933"                                                          sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
+        <KPI icon="📊" label="Margem de Contribuição"   value={`${R(totalMC)} · ${P(mcPct)}`}  color={mcPct >= 0.30 ? '#a78bfa' : mcPct >= 0.15 ? '#f59e0b' : '#ef4444'} sub="Receita − Custos Variáveis" />
+        <KPI icon="✅" label="Lucro Líquido Real"       value={R(lucroLiq)}                    color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'}                            sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
+        <KPI icon="📈" label="Margem Líquida"           value={P(margemLiq)}                   color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
+        <KPI icon="⚡" label="ROAS Geral"               value={`${roas.toFixed(2)}x`}          color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'}       sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
+        <KPI icon="🛒" label="Total de Pedidos"         value={N(pedSet)}                      color="#a78bfa"                                                          sub={`Ticket médio: ${R(ticket)}`} />
       </div>
 
       {/* Resultado por Loja + Gráfico Dia */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%', marginBottom: 20 }}>
         <div style={S.card}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8', letterSpacing: 0.2 }}>🏪 Resultado por Loja</div>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>🏪 Resultado por Loja</div>
           <Table
             headers={['Loja', 'Faturamento', 'Mg Contrib', 'MC%', 'Lucro Op', 'Gasto Ads', 'Lucro Líq', 'ROAS', 'Margem']}
             rows={porLoja.map(l => [
@@ -271,9 +261,8 @@ export default function DashboardPage() {
             ])}
           />
         </div>
-
         <div style={S.card}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8', letterSpacing: 0.2 }}>📅 Faturamento por Dia</div>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>📅 Faturamento por Dia</div>
           {dayChart.length > 0
             ? <MiniBar data={dayChart} height={130} />
             : <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>
@@ -284,49 +273,39 @@ export default function DashboardPage() {
       {/* Top Produtos + Alertas Estoque */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%' }}>
         <div style={S.card}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8', letterSpacing: 0.2 }}>🏆 Top Produtos por Receita</div>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>🏆 Top Produtos por Receita</div>
           <Table
-            headers={['#', 'SKU', 'Produto', 'Qtd', 'Receita', 'Lucro', 'Margem']}
+            headers={['#', 'SKU', 'Produto', 'Qtd', 'Receita', 'Margem']}
             rows={topSkus.map((s: any, i: number) => [
               <span style={{ color: '#555', fontFamily: 'monospace' }}>{i + 1}</span>,
               <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{s.sku}</span>,
               <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{s.nome}</span>,
               N(s.qtd),
               <span style={{ fontFamily: 'monospace' }}>{R(s.rec)}</span>,
-              <span style={{ fontFamily: 'monospace', color: s.lucro >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(s.lucro)}</span>,
-              <StatusBadge v={s.rec > 0 ? s.lucro / s.rec : 0} />,
+              <StatusBadge v={s.rec > 0 ? (s.rec - s.lucro) / s.rec : 0} />,
             ])}
             emptyMsg="Sem dados de vendas"
           />
         </div>
-
         <div style={S.card}>
-          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8', letterSpacing: 0.2 }}>⚠️ Alertas de Estoque</div>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>⚠️ Alertas de Estoque</div>
           {criticos.length === 0
             ? <div style={{ color: '#22c55e', textAlign: 'center', padding: 32, fontSize: 13 }}>✅ Todos os produtos com estoque adequado</div>
-            : (
-              <Table
+            : <Table
                 headers={['SKU', 'Produto', 'Atual', 'Mínimo', 'Status']}
                 rows={criticos.map(e => [
                   <span style={{ fontFamily: 'monospace', color: '#ef4444', fontSize: 11 }}>{e.sku_base}</span>,
                   e.produto,
                   N(e.estoque_atual || 0),
                   N(e.estoque_minimo || 0),
-                  e.estoque_atual <= 0
-                    ? <Badge color="#ef4444">SEM ESTOQUE</Badge>
-                    : <Badge color="#f59e0b">BAIXO</Badge>,
+                  e.estoque_atual <= 0 ? <Badge color="#ef4444">SEM ESTOQUE</Badge> : <Badge color="#f59e0b">BAIXO</Badge>,
                 ])}
               />
-            )
           }
-
-          {/* Barras de estoque */}
           <div style={{ marginTop: 14 }}>
             {estoque.map(e => {
               const cor = (e.estoque_atual || 0) <= 0 ? '#ef4444' : (e.estoque_atual || 0) < (e.estoque_minimo || 0) ? '#f59e0b' : '#22c55e'
-              const pct = (e.estoque_minimo || 0) > 0
-                ? Math.min((e.estoque_atual || 0) / ((e.estoque_minimo || 0) * 2), 1)
-                : (e.estoque_atual || 0) > 0 ? 1 : 0
+              const pct = (e.estoque_minimo || 0) > 0 ? Math.min((e.estoque_atual || 0) / ((e.estoque_minimo || 0) * 2), 1) : (e.estoque_atual || 0) > 0 ? 1 : 0
               return (
                 <div key={e.id} style={{ marginBottom: 7 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 3 }}>
@@ -342,6 +321,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
