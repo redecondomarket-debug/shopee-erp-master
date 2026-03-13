@@ -172,6 +172,7 @@ export default function FinanceiroPage() {
   const [showCfg,    setShowCfg]    = useState(false)
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [periodo,    setPeriodo]    = useState('personalizado')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
@@ -215,6 +216,27 @@ export default function FinanceiroPage() {
   }
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
+
+  function aplicarPeriodo(p: string) {
+    setPeriodo(p)
+    const hoje = new Date()
+    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    const ini = (d: Date) => { const x = new Date(d); return x }
+    if (p === 'hoje') {
+      setDateFrom(fmt(hoje)); setDateTo(fmt(hoje))
+    } else if (p === 'ontem') {
+      const d = new Date(hoje); d.setDate(d.getDate()-1)
+      setDateFrom(fmt(d)); setDateTo(fmt(d))
+    } else if (p === 'semana') {
+      const d = new Date(hoje); d.setDate(d.getDate()-6)
+      setDateFrom(fmt(d)); setDateTo(fmt(hoje))
+    } else if (p === 'mes') {
+      const d = new Date(hoje); d.setDate(d.getDate()-29)
+      setDateFrom(fmt(d)); setDateTo(fmt(hoje))
+    } else if (p === 'tudo') {
+      setDateFrom(''); setDateTo('')
+    }
+  }
 
   // Importar Excel da Shopee — CORREÇÃO 1: lê por nome de coluna
   async function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
@@ -324,12 +346,10 @@ export default function FinanceiroPage() {
     return true
   }).map(r => {
     const recBruta = r.valor_bruto || r.valor_bruto || 0
-    const taxaShopee = (r.taxa_shopee && r.taxa_shopee > 0)
-      ? r.taxa_shopee
+    const taxaShopee = (r.comissao_shopee && r.comissao_shopee > 0)
+      ? r.comissao_shopee
       : recBruta * TAXA_SHOPEE
-    const taxaFixa   = (r.taxas_shopee && r.taxas_shopee > 0)
-      ? r.taxas_shopee
-      : TAXA_FIXA
+    const taxaFixa   = TAXA_FIXA
     // Custo produto: usa banco se preenchido, senão calcula via sku_map + estoque
     const skuVenda = r.sku || ''
     const custoProdCalc = calcCustoProduto(skuVenda, r.quantidade || 1)
@@ -375,6 +395,36 @@ export default function FinanceiroPage() {
           {saving ? '⏳ Importando...' : '📊 Importar Excel Shopee'}
         </button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleExcel} style={{ display: 'none' }} />
+      </div>
+
+      {/* FILTROS */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={filterLoja} onChange={e => setFilterLoja(e.target.value)} style={{ ...S.inp, width: 180 } as any}>
+          <option value="Todas">Todas as lojas</option>
+          {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
+        </select>
+        {/* Filtros rápidos de período */}
+        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
+            background: periodo === p ? '#ff6600' : '#13131e',
+            color: periodo === p ? '#fff' : '#9090aa',
+            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
+            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
+          }}>
+            {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
+          </button>
+        ))}
+        {/* Datas personalizadas */}
+        {periodo === 'personalizado' && <>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
+          <span style={{ color: '#555', fontSize: 12 }}>até</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
+        </>}
+        {/* Botão excluir período */}
+        <button onClick={() => setConfirmDel(true)} style={{
+          background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430',
+          borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 11, marginLeft: 'auto'
+        }}>🗑️ Excluir Período</button>
       </div>
 
       {/* PAINEL CONFIGURAÇÕES */}
@@ -433,22 +483,22 @@ export default function FinanceiroPage() {
 
       {/* FILTROS */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select value={filterLoja} onChange={e => setFilterLoja(e.target.value)} style={{ ...S.inp, width: 'auto', fontSize: 12 } as any}>
-          <option>Todas</option>{LOJAS.map(l => <option key={l}>{l}</option>)}
-        </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
-        <span style={{ color: '#555', fontSize: 12 }}>até</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140, padding: '5px 8px', fontSize: 12 } as any} />
-        {(dateFrom || dateTo) && (
-          confirmDel
-            ? <>
-                <span style={{ fontSize: 12, color: '#ef4444' }}>Confirmar limpeza?</span>
-                <button onClick={limparPeriodo} style={{ ...S.btnDanger, fontSize: 12 } as any}>✓ Sim</button>
-                <button onClick={() => setConfirmDel(false)} style={S.btnSm as any}>✕ Não</button>
-              </>
-            : <button onClick={() => setConfirmDel(true)} style={S.btnDanger as any}>🗑️ Limpar Período</button>
-        )}
+
       </div>
+
+      {/* MODAL CONFIRMAR EXCLUSÃO */}
+      {confirmDel && (
+        <div style={{ background: '#1a0a0a', border: '1px solid #ef444444', borderRadius: 10, padding: '14px 18px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 18 }}>⚠️</span>
+          <span style={{ fontSize: 13, color: '#ef4444', fontWeight: 700 }}>
+            Excluir {filtered.length} pedido(s) do período {dateFrom ? dateFrom.split('-').reverse().join('/') : '...'} até {dateTo ? dateTo.split('-').reverse().join('/') : '...'}?
+          </span>
+          <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+            <button onClick={() => setConfirmDel(false)} style={{ background: 'transparent', color: '#9090aa', border: '1px solid #2a2a3a', borderRadius: 7, padding: '7px 16px', cursor: 'pointer', fontWeight: 600, fontSize: 12 }}>Cancelar</button>
+            <button onClick={limparPeriodo} style={{ background: '#ef4444', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 18px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>✓ Confirmar Exclusão</button>
+          </div>
+        </div>
+      )}
 
       {/* TOTALIZADOR */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 10, padding: '8px 14px', background: '#13131e', borderRadius: 8, border: '1px solid #2a2a3a', fontSize: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -471,7 +521,7 @@ export default function FinanceiroPage() {
             <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku || p.sku}</span>,
             <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{p.produto}</span>,
             N(p.quantidade),
-            R(p._preco_unitario || 0),
+            R(p.quantidade > 0 ? p.recBruta / p.quantidade : 0),
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.recBruta)}</span>,
             <span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(p.taxaShopee)}</span>,
             <span style={{ fontFamily: 'monospace' }}>{R(p.taxaFixa)}</span>,
