@@ -11,7 +11,7 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA   = 4.05
+const TAXA_FIXA   = 4.00
 const DEFAULT_IMPOSTO = 0.06
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -227,9 +227,19 @@ export default function FinanceiroPage() {
     // sheet_to_json sem header:1 → cada linha é objeto { "Order ID": ..., "Agreed Price": ..., ... }
     const jsonRows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { raw: false, defval: '' })
 
+    // DEBUG — ver keys da primeira linha no console
+    if (jsonRows.length > 0) {
+      console.log('[DEBUG] Keys da linha 1:', Object.keys(jsonRows[0]))
+      console.log('[DEBUG] Status:', jsonRows[0]['Status do pedido'])
+      console.log('[DEBUG] ID pedido:', jsonRows[0]['ID do pedido'])
+      console.log('[DEBUG] Data:', jsonRows[0]['Data de criação do pedido'])
+    }
+
     const parsed = jsonRows
       .map(row => parseShopeeRow(row))
       .filter((r): r is NonNullable<typeof r> => r !== null)
+
+    console.log('[DEBUG] Total linhas:', jsonRows.length, '| Válidas:', parsed.length)
 
     if (!parsed.length) { showToast('Nenhum pedido válido encontrado. Verifique o arquivo e os status.', 'err'); return }
 
@@ -384,7 +394,7 @@ export default function FinanceiroPage() {
             </div>
             <div style={{ fontSize: 11, color: '#555', padding: '8px 12px', background: '#13131e', borderRadius: 6 }}>
               <div>Taxa Shopee: <strong style={{ color: '#ff9933' }}>20%</strong></div>
-              <div>Taxa Fixa: <strong style={{ color: '#ff9933' }}>R$ 4,05/pedido</strong></div>
+              <div>Taxa Fixa: <strong style={{ color: '#ff9933' }}>R$ 4,00/pedido</strong></div>
             </div>
           </div>
         </div>
