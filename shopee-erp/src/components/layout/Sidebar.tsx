@@ -1,6 +1,8 @@
 'use client'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
 const TABS = [
   { href: '/dashboard',        icon: '⚡', label: 'Dashboard'        },
@@ -26,8 +28,25 @@ const GROUPS = [
 
 export default function Sidebar() {
   const pathname = usePathname()
+  const router   = useRouter()
+  const [email,      setEmail]      = useState('')
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.email) setEmail(session.user.email)
+    })
+  }, [])
+
+  async function handleLogout() {
+    setLoggingOut(true)
+    await supabase.auth.signOut()
+    router.replace('/login')
+  }
+
   return (
     <aside style={{ width:220, background:'#0d0d16', borderRight:'1px solid #1e1e2c', minHeight:'100vh', display:'flex', flexDirection:'column', position:'sticky', top:0, flexShrink:0 }}>
+
       <div style={{ padding:'20px 18px 16px', borderBottom:'1px solid #1e1e2c' }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ width:34, height:34, borderRadius:9, background:'linear-gradient(135deg,#ff6600,#ff9500)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:17, flexShrink:0, boxShadow:'0 4px 12px #ff660040' }}>🛍️</div>
@@ -37,6 +56,7 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
+
       <nav style={{ flex:1, padding:'10px 0 8px', overflowY:'auto' }}>
         {GROUPS.map(group => (
           <div key={group.label} style={{ marginBottom:4 }}>
@@ -53,7 +73,23 @@ export default function Sidebar() {
           </div>
         ))}
       </nav>
-      <div style={{ padding:'10px 18px 14px', borderTop:'1px solid #1e1e2c', fontSize:9.5, color:'#28283a', letterSpacing:0.8, fontWeight:600 }}>SHOPEE ERP MASTER v2.0</div>
+
+      <div style={{ padding:'12px 18px 16px', borderTop:'1px solid #1e1e2c' }}>
+        {email && (
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+            <div style={{ width:28, height:28, borderRadius:'50%', background:'#ff660022', border:'1px solid #ff660044', display:'flex', alignItems:'center', justifyContent:'center', fontSize:13, flexShrink:0 }}>👤</div>
+            <div style={{ overflow:'hidden' }}>
+              <div style={{ fontSize:10, color:'#55556a', fontWeight:600, letterSpacing:0.5 }}>LOGADO COMO</div>
+              <div style={{ fontSize:11, color:'#9090aa', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:140 }}>{email}</div>
+            </div>
+          </div>
+        )}
+        <button onClick={handleLogout} disabled={loggingOut} style={{ width:'100%', background:'#ef444412', color:'#ef4444', border:'1px solid #ef444430', borderRadius:7, padding:'8px 0', cursor:loggingOut?'not-allowed':'pointer', fontWeight:700, fontSize:12, display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+          {loggingOut ? '⏳ Saindo...' : '🚪 Sair do Sistema'}
+        </button>
+        <div style={{ marginTop:10, fontSize:9, color:'#22223a', letterSpacing:0.8, fontWeight:600, textAlign:'center' }}>SHOPEE ERP MASTER v2.0</div>
+      </div>
+
     </aside>
   )
 }
