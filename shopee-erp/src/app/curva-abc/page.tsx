@@ -1,173 +1,224 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
-import { exportToExcel, exportToPDF } from '@/lib/exports'
-import { TrendingUp, Download, FileText, X } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+
+const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
+const LOJA_COLORS: Record<string, string> = {
+  'KL MARKET': '#ff6600', 'UNIVERSO DOS ACHADOS': '#0ea5e9', 'MUNDO DOS ACHADOS': '#a855f7'
+}
+const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
+const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
+const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
+
+const CLASS_COLOR = { A: '#22c55e', B: '#f59e0b', C: '#ef4444' }
+const CLASS_BG    = { A: '#22c55e22', B: '#f59e0b22', C: '#ef444422' }
+const CLASS_LABEL = { A: 'Classe A — 80% do faturamento', B: 'Classe B — 15% do faturamento', C: 'Classe C — 5% do faturamento' }
+
+const S: Record<string, React.CSSProperties> = {
+  card:  { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:    { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:    { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:   { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
+  btnSm: { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+}
 
 type CurvaItem = {
-  sku: string; unidades: number; faturamento: number
-  participacao: number; participacaoAcumulada: number; classe: 'A' | 'B' | 'C'
+  sku: string; produto: string; unidades: number; faturamento: number
+  participacao: number; acumulado: number; classe: 'A' | 'B' | 'C'
 }
-
-const LOJAS = ['KL Market', 'Universo dos Achados', 'Mundo dos Achados']
-function formatCurrency(val: number) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0)
-}
-const CLASS_COLORS = { A: '#EE2C00', B: '#ffaa00', C: '#555570' }
-const CLASS_BG = { A: 'rgba(238,44,0,0.1)', B: 'rgba(255,170,0,0.1)', C: 'rgba(85,85,112,0.1)' }
 
 export default function CurvaABCPage() {
-  const [vendas, setVendas] = useState<{ sku_venda: string; quantidade: number; valor_venda: number; loja: string; data: string }[]>([])
-  const [curva, setCurva] = useState<CurvaItem[]>([])
-  const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'all' | 'A' | 'B' | 'C'>('all')
-  const [lojaFilter, setLojaFilter] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [financeiro, setFinanceiro] = useState<any[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [lojaFiltro, setLojaFiltro] = useState('Todas')
+  const [dateFrom,   setDateFrom]   = useState('')
+  const [dateTo,     setDateTo]     = useState('')
+  const [periodo,    setPeriodo]    = useState('personalizado')
+  const [classFiltro,setClassFiltro]= useState<'all' | 'A' | 'B' | 'C'>('all')
 
-  useEffect(() => { loadData() }, [])
-  useEffect(() => { calcularCurva() }, [vendas, lojaFilter, dateFrom, dateTo])
+  useEffect(() => { load() }, [])
 
-  async function loadData() {
+  async function load() {
     setLoading(true)
-    const { data } = await supabase.from('vendas').select('sku_venda, quantidade, valor_venda, loja, data')
-    setVendas(data || [])
+    const { data } = await supabase.from('financeiro').select('sku,produto,quantidade,valor_bruto,loja,data').limit(5000)
+    setFinanceiro(data || [])
     setLoading(false)
   }
 
-  function calcularCurva() {
-    const vendasFiltradas = vendas.filter(v => {
-      if (lojaFilter && v.loja !== lojaFilter) return false
-      if (dateFrom && v.data < dateFrom) return false
-      if (dateTo && v.data > dateTo) return false
-      return true
-    })
-    if (!vendasFiltradas.length) { setCurva([]); return }
-
-    const map: Record<string, { unidades: number; faturamento: number }> = {}
-    for (const v of vendasFiltradas) {
-      if (!map[v.sku_venda]) map[v.sku_venda] = { unidades: 0, faturamento: 0 }
-      map[v.sku_venda].unidades += v.quantidade || 0
-      map[v.sku_venda].faturamento += v.valor_venda || 0
-    }
-
-    const total = Object.values(map).reduce((s, i) => s + i.faturamento, 0)
-    const sorted = Object.entries(map).sort((a, b) => b[1].faturamento - a[1].faturamento)
-
-    let acumulado = 0
-    const result: CurvaItem[] = sorted.map(([sku, val]) => {
-      const participacao = total > 0 ? (val.faturamento / total) * 100 : 0
-      acumulado += participacao
-      const classe: 'A' | 'B' | 'C' = acumulado <= 80 ? 'A' : acumulado <= 95 ? 'B' : 'C'
-      return { sku, unidades: val.unidades, faturamento: val.faturamento, participacao, participacaoAcumulada: acumulado, classe }
-    })
-    setCurva(result)
+  function aplicarPeriodo(p: string) {
+    setPeriodo(p)
+    const hoje = new Date()
+    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    if (p === 'hoje')    { setDateFrom(fmt(hoje)); setDateTo(fmt(hoje)) }
+    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate()-1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
+    else if (p === 'semana'){ const d = new Date(hoje); d.setDate(d.getDate()-6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'mes')   { const d = new Date(hoje); d.setDate(d.getDate()-29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'tudo')  { setDateFrom(''); setDateTo('') }
   }
 
-  const limparFiltros = () => { setLojaFilter(''); setDateFrom(''); setDateTo('') }
-  const temFiltro = lojaFilter || dateFrom || dateTo
-  const filtered = filter === 'all' ? curva : curva.filter(c => c.classe === filter)
-  const totalA = curva.filter(c => c.classe === 'A').length
-  const totalB = curva.filter(c => c.classe === 'B').length
-  const totalC = curva.filter(c => c.classe === 'C').length
+  const curva: CurvaItem[] = useMemo(() => {
+    const filtrado = financeiro.filter(f => {
+      if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return false
+      if (dateFrom && f.data < dateFrom) return false
+      if (dateTo   && f.data > dateTo)   return false
+      return true
+    })
+    if (!filtrado.length) return []
+
+    const map: Record<string, { produto: string; unidades: number; faturamento: number }> = {}
+    filtrado.forEach(f => {
+      const sku = f.sku || 'SEM SKU'
+      if (!map[sku]) map[sku] = { produto: f.produto || sku, unidades: 0, faturamento: 0 }
+      map[sku].unidades   += f.quantidade   || 1
+      map[sku].faturamento += f.valor_bruto || 0
+    })
+
+    const total  = Object.values(map).reduce((s, i) => s + i.faturamento, 0)
+    const sorted = Object.entries(map).sort((a, b) => b[1].faturamento - a[1].faturamento)
+
+    let acum = 0
+    return sorted.map(([sku, val]) => {
+      const part = total > 0 ? (val.faturamento / total) * 100 : 0
+      acum += part
+      const classe: 'A' | 'B' | 'C' = acum <= 80 ? 'A' : acum <= 95 ? 'B' : 'C'
+      return { sku, produto: val.produto, unidades: val.unidades, faturamento: val.faturamento, participacao: part, acumulado: acum, classe }
+    })
+  }, [financeiro, lojaFiltro, dateFrom, dateTo])
+
+  const filtered = classFiltro === 'all' ? curva : curva.filter(c => c.classe === classFiltro)
+  const totA = curva.filter(c => c.classe === 'A').length
+  const totB = curva.filter(c => c.classe === 'B').length
+  const totC = curva.filter(c => c.classe === 'C').length
+  const totalFat = curva.reduce((s, c) => s + c.faturamento, 0)
+  const maxFat   = curva.length > 0 ? curva[0].faturamento : 1
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+      <div style={{ width: 36, height: 36, border: '2px solid #1e1e2c', borderTop: '2px solid #ff6600', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex items-start justify-between flex-wrap gap-4">
+    <div style={{ padding: '20px 24px', width: '100%', boxSizing: 'border-box' }}>
+
+      {/* HEADER */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         <div>
-          <h1 className="text-2xl font-bold" style={{ fontFamily: 'var(--font-display)' }}>Curva ABC</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {lojaFilter || 'Todas as lojas'} · {curva.length} SKUs analisados
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => exportToExcel(curva.map(c => ({
-            'SKU': c.sku, 'Unidades': c.unidades, 'Faturamento': c.faturamento,
-            '% Part.': c.participacao.toFixed(2) + '%', '% Acum.': c.participacaoAcumulada.toFixed(2) + '%', 'Classe': c.classe,
-          })), 'curva-abc')} className="btn-secondary"><Download className="w-4 h-4" /> Excel</button>
-          <button onClick={() => exportToPDF('Análise Curva ABC', [
-            { header: 'SKU', dataKey: 'sku' }, { header: 'Unidades', dataKey: 'unidades' },
-            { header: 'Faturamento', dataKey: 'faturamento' }, { header: '% Part.', dataKey: 'participacao' }, { header: 'Classe', dataKey: 'classe' },
-          ], curva.map(c => ({ ...c, participacao: c.participacao.toFixed(2) + '%' })), 'curva-abc')}
-            className="btn-secondary"><FileText className="w-4 h-4" /> PDF</button>
+          <h2 style={{ margin: '0 0 4px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📊 Curva ABC</h2>
+          <p style={{ margin: 0, fontSize: 12, color: '#55556a' }}>{curva.length} SKUs analisados · {R(totalFat)} faturamento total</p>
         </div>
       </div>
 
-      {/* Filtros */}
-      <div className="flex gap-3 flex-wrap items-center">
-        <select value={lojaFilter} onChange={e => setLojaFilter(e.target.value)} className="input-field w-52">
-          <option value="">Todas as lojas</option>
+      {/* FILTROS */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={lojaFiltro} onChange={e => setLojaFiltro(e.target.value)} style={{ ...S.inp, width: 200 } as any}>
+          <option value="Todas">Todas as lojas</option>
           {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input-field w-36" />
-        <span style={{ color: 'var(--text-muted)' }}>até</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input-field w-36" />
-        {temFiltro && <button onClick={limparFiltros} className="btn-secondary"><X className="w-4 h-4" /> Limpar</button>}
+        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
+            background: periodo === p ? '#ff6600' : '#13131e',
+            color: periodo === p ? '#fff' : '#9090aa',
+            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
+            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
+          }}>
+            {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
+          </button>
+        ))}
+        {periodo === 'personalizado' && <>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
+          <span style={{ color: '#555', fontSize: 12 }}>até</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
+        </>}
       </div>
 
-      {/* Cards A/B/C */}
-      <div className="grid grid-cols-3 gap-4">
-        {([['A', '80% do faturamento', totalA], ['B', '15% do faturamento', totalB], ['C', '5% do faturamento', totalC]] as [string, string, number][]).map(([cls, label, count]) => (
-          <div key={cls} className="stat-card cursor-pointer"
-            style={{ borderColor: filter === cls ? CLASS_COLORS[cls as 'A'|'B'|'C'] : undefined }}
-            onClick={() => setFilter(filter === cls ? 'all' : cls as 'A'|'B'|'C')}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-lg"
-                style={{ background: CLASS_BG[cls as 'A'|'B'|'C'], color: CLASS_COLORS[cls as 'A'|'B'|'C'] }}>{cls}</div>
+      {/* CARDS A/B/C */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+        {(['A','B','C'] as const).map(cls => (
+          <div key={cls} onClick={() => setClassFiltro(classFiltro === cls ? 'all' : cls)}
+            style={{ ...S.card, cursor: 'pointer', border: `1px solid ${classFiltro === cls ? CLASS_COLOR[cls] : '#222232'}`, transition: 'all .15s' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 10, background: CLASS_BG[cls], display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, fontWeight: 800, color: CLASS_COLOR[cls], flexShrink: 0 }}>{cls}</div>
               <div>
-                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Classe {cls} — {label}</p>
-                <p className="text-xl font-bold" style={{ color: CLASS_COLORS[cls as 'A'|'B'|'C'] }}>{count} SKUs</p>
+                <div style={{ fontSize: 10, color: '#55556a', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>{CLASS_LABEL[cls]}</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: CLASS_COLOR[cls], marginTop: 2 }}>
+                  {cls === 'A' ? totA : cls === 'B' ? totB : totC} SKUs
+                </div>
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Chart */}
+      {/* GRÁFICO DE BARRAS */}
       {curva.length > 0 && (
-        <div className="card">
-          <h2 className="font-semibold text-sm mb-4">Top 10 SKUs por Faturamento</h2>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={curva.slice(0, 10)}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="sku" stroke="#555570" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#555570" tick={{ fontSize: 11 }} tickFormatter={v => `R$${(v / 1000).toFixed(0)}k`} />
-              <Tooltip contentStyle={{ background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 8 }}
-                formatter={(val: number) => [formatCurrency(val), 'Faturamento']} />
-              <Bar dataKey="faturamento" radius={[4, 4, 0, 0]}>
-                {curva.slice(0, 10).map(entry => <Cell key={entry.sku} fill={CLASS_COLORS[entry.classe]} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <div style={{ ...S.card, marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8', marginBottom: 14 }}>🏆 Top 10 SKUs por Faturamento</div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 140, padding: '4px 0' }}>
+            {curva.slice(0, 10).map((item, i) => {
+              const h = Math.max((item.faturamento / maxFat) * 110, 4)
+              return (
+                <div key={item.sku} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div style={{ fontSize: 9, color: '#55556a', fontFamily: 'monospace' }}>{R(item.faturamento).replace('R$\u00a0','R$')}</div>
+                  <div style={{ width: '100%', height: h, background: CLASS_COLOR[item.classe], borderRadius: '3px 3px 0 0', transition: 'height .3s', opacity: 0.85 }} />
+                  <div style={{ fontSize: 9, color: '#9090aa', fontFamily: 'monospace', textAlign: 'center', maxWidth: 50, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.sku}</div>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 10, justifyContent: 'center' }}>
+            {(['A','B','C'] as const).map(cls => (
+              <div key={cls} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#9090aa' }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: CLASS_COLOR[cls] }} />
+                Classe {cls}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Table */}
-      <div className="table-container">
-        <div className="grid grid-cols-6 table-header">
-          <span>Rank</span><span>SKU</span><span className="text-center">Unidades</span>
-          <span className="text-right">Faturamento</span><span className="text-right">% Part.</span><span className="text-center">Classe</span>
+      {/* TABELA */}
+      <div style={{ ...S.card, padding: 0, overflow: 'hidden' }}>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {['Rank', 'SKU', 'Produto', 'Unidades', 'Faturamento', '% Part.', '% Acum.', 'Classe'].map(h => (
+                  <th key={h} style={{ ...S.th, textAlign: ['Unidades','Faturamento','% Part.','% Acum.'].includes(h) ? 'center' as any : S.th.textAlign }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr><td colSpan={8} style={{ ...S.td, textAlign: 'center', padding: 48, color: '#55556a' }}>Sem dados no período</td></tr>
+              ) : filtered.map((item, i) => (
+                <tr key={item.sku} style={{ borderLeft: `3px solid ${CLASS_COLOR[item.classe]}` }}>
+                  <td style={S.td}><span style={{ color: '#55556a', fontFamily: 'monospace', fontSize: 11 }}>#{curva.indexOf(item) + 1}</span></td>
+                  <td style={S.td}><span style={{ fontFamily: 'monospace', color: '#ff6600', fontWeight: 700 }}>{item.sku}</span></td>
+                  <td style={{ ...S.td, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.produto}</td>
+                  <td style={{ ...S.td, textAlign: 'center', fontFamily: 'monospace' }}>{N(item.unidades)}</td>
+                  <td style={{ ...S.td, textAlign: 'center', fontFamily: 'monospace', fontWeight: 700 }}>{R(item.faturamento)}</td>
+                  <td style={{ ...S.td, textAlign: 'center', fontFamily: 'monospace' }}>{item.participacao.toFixed(1)}%</td>
+                  <td style={{ ...S.td, textAlign: 'center' }}>
+                    <div style={{ height: 4, background: '#1e1e2a', borderRadius: 2, width: 80, margin: '0 auto' }}>
+                      <div style={{ height: '100%', width: `${Math.min(item.acumulado, 100)}%`, background: CLASS_COLOR[item.classe], borderRadius: 2 }} />
+                    </div>
+                    <div style={{ fontSize: 10, color: '#9090aa', marginTop: 2 }}>{item.acumulado.toFixed(1)}%</div>
+                  </td>
+                  <td style={{ ...S.td, textAlign: 'center' as any }}>
+                    <span style={{ background: CLASS_BG[item.classe], color: CLASS_COLOR[item.classe], border: `1px solid ${CLASS_COLOR[item.classe]}44`, borderRadius: 5, padding: '3px 12px', fontSize: 12, fontWeight: 800 }}>
+                      {item.classe}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        {loading ? (
-          <div className="text-center py-12" style={{ color: 'var(--text-secondary)' }}>Calculando...</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-12"><TrendingUp className="w-12 h-12 mx-auto mb-3 opacity-20" />
-            <p style={{ color: 'var(--text-secondary)' }}>Nenhum dado para análise</p></div>
-        ) : filtered.map(item => (
-          <div key={item.sku} className="grid grid-cols-6 table-row items-center">
-            <span className="text-sm font-bold" style={{ color: 'var(--text-muted)' }}>#{curva.indexOf(item) + 1}</span>
-            <span className="font-mono text-sm" style={{ color: 'var(--shopee-primary)' }}>{item.sku}</span>
-            <span className="text-center text-sm">{item.unidades.toLocaleString('pt-BR')}</span>
-            <span className="text-right text-sm font-semibold">{formatCurrency(item.faturamento)}</span>
-            <span className="text-right text-sm">{item.participacao.toFixed(2)}%</span>
-            <div className="flex justify-center">
-              <span className="px-3 py-1 rounded-full text-xs font-bold"
-                style={{ background: CLASS_BG[item.classe], color: CLASS_COLORS[item.classe] }}>{item.classe}</span>
-            </div>
-          </div>
-        ))}
       </div>
+
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
