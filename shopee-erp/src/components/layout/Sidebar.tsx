@@ -13,6 +13,7 @@ const TABS = [
   { href: '/ads',              icon: '📣', label: 'Shopee Ads'       },
   { href: '/analise-produtos', icon: '🔍', label: 'Análise Produtos' },
   { href: '/analise-ads',      icon: '📈', label: 'Análise Ads'      },
+  { href: '/curva-abc',        icon: '📊', label: 'Curva ABC'         },
   { href: '/composicao',       icon: '🧩', label: 'Composição'       },
   { href: '/produtos-base',    icon: '🗂️', label: 'Produtos Base'    },
   { href: '/compras',          icon: '🛒', label: 'Ordem de Compra'  },
@@ -22,8 +23,8 @@ const TABS = [
 const GROUPS = [
   { label: 'Visão Geral', items: TABS.slice(0, 3)  },
   { label: 'Operações',   items: TABS.slice(3, 6)  },
-  { label: 'Análises',    items: TABS.slice(6, 9)  },
-  { label: 'Gestão',      items: TABS.slice(9, 12) },
+  { label: 'Análises',    items: TABS.slice(6, 10) },
+  { label: 'Gestão',      items: TABS.slice(10, 13) },
 ]
 
 export default function Sidebar() {
