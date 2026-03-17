@@ -116,8 +116,7 @@ export default function DREPage() {
       const taxas = lp.reduce((s, f) => {
         const rb = f.valor_bruto || 0
         const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : rb * TAXA_SHOPEE
-        const tf = TAXA_FIXA
-        return s + ts + tf
+        return s + ts
       }, 0)
       const cprod = lp.reduce((s, f) => {
         const sku = f.sku || ''
