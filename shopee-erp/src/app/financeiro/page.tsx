@@ -170,7 +170,16 @@ export default function FinanceiroPage() {
   const [filterLoja, setFilterLoja] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
-  const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
+  const [imposto,    setImposto]    = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_IMPOSTO
+    const saved = localStorage.getItem('erp_imposto')
+    return saved ? parseFloat(saved) : DEFAULT_IMPOSTO
+  })
+  const [impostoInput, setImpostoInput] = useState(() => {
+    if (typeof window === 'undefined') return (DEFAULT_IMPOSTO * 100).toFixed(1)
+    const saved = localStorage.getItem('erp_imposto')
+    return saved ? (parseFloat(saved) * 100).toFixed(1) : (DEFAULT_IMPOSTO * 100).toFixed(1)
+  })
   const [showCfg,    setShowCfg]    = useState(false)
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
@@ -431,8 +440,19 @@ export default function FinanceiroPage() {
           <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
               <label style={S.label}>Imposto sobre Receita (%)</label>
-              <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
-                style={{ ...S.inp, width: 100 } as any} step="0.1" min="0" max="50" />
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
+                  style={{ ...S.inp, width: 80 } as any} step="0.1" min="0" max="50" />
+                <span style={{ fontSize: 12, color: '#55556a' }}>%</span>
+                <button onClick={() => {
+                  const v = parseFloat(impostoInput) / 100
+                  setImposto(v)
+                  localStorage.setItem('erp_imposto', String(v))
+                  showToast('Imposto salvo: ' + impostoInput + '%')
+                }} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                  ✓ Salvar
+                </button>
+              </div>
             </div>
             <div>
               <label style={S.label}>Custo Embalagem Adicional (R$/pedido)</label>
