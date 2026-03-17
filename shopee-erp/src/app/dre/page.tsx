@@ -130,7 +130,7 @@ export default function DREPage() {
       const gads  = (modo === 'resumido'
         ? adsF.filter(a => a.data === data)
         : adsF.filter(a => a.data === data && a.loja === loja)
-      ).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+      ).reduce((s, a) => s + (a.investimento || 0), 0)
       const ll     = lucOp - gads
       const peds   = new Set(lp.map(f => f.pedido)).size
 
@@ -156,7 +156,7 @@ export default function DREPage() {
         const ce2   = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
         const mc2   = r2 - t2 - cp2 - ce2
         const lo2   = mc2 - i2
-        const g2    = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
+        const g2    = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.investimento || 0), 0)
         return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.pedido)).size }
       })
 
@@ -167,8 +167,11 @@ export default function DREPage() {
   const tot = useMemo(() => {
     const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
     rows.forEach(r => Object.keys(t).forEach(k => (t as any)[k] += (r as any)[k] || 0))
-    return { ...t, mcPct: t.rec > 0 ? t.mc / t.rec : 0 }
-  }, [rows])
+    // Sobrescrever gads com total real de adsF (inclui dias sem pedidos)
+    const totalGadsReal = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
+    const totalLLReal   = t.lucOp - totalGadsReal
+    return { ...t, gads: totalGadsReal, ll: totalLLReal, mcPct: t.rec > 0 ? t.mc / t.rec : 0 }
+  }, [rows, adsF])
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
