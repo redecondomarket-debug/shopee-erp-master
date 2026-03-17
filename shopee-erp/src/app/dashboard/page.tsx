@@ -142,7 +142,7 @@ export default function DashboardPage() {
   const totalRec   = finF.reduce((s, f) => s + (f.valor_bruto || 0), 0)
   const totalTaxas = finF.reduce((s, f) => {
     const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE
-    return s + ts + TAXA_FIXA
+    return s + ts
   }, 0)
   const totalCprod = finF.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
   const totalMC    = totalRec - totalTaxas - totalCprod
