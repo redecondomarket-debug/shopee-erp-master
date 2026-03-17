@@ -127,8 +127,11 @@ function parseShopeeRow(row: Record<string, any>): any | null {
   const valorBruto    = precoUnitario * quantidade
 
   // ── Taxas reais (EN + PT) ─────────────────────────────────────────────────
+  // Taxa Shopee = Cupom do Vendedor + Taxa de Comissão Bruta + Taxa de Serviço Bruta
+  const cupomVendedor  = Math.abs(num(row['Cupom do vendedor'] || row['Seller Voucher'] || row['Voucher Seller'] || 0))
   const comissaoShopee = Math.abs(num(row['Shopee Commission'] || row['Taxa de comissão bruta'] || row['Komisi Shopee'] || 0))
-  const taxaShopee     = Math.abs(num(row['Shopee Fee']        || row['Taxa de serviço bruta']  || row['Biaya Shopee'] || 0))
+  const taxaServico    = Math.abs(num(row['Shopee Fee']        || row['Taxa de serviço bruta']  || row['Biaya Shopee'] || 0))
+  const taxaShopeeTotal = cupomVendedor + comissaoShopee + taxaServico
   const valorLiquido   = num(row['Final Amount Received'] || row['Total global'] || row['Total Diterima'] || 0)
 
   // ── Loja (EN + PT) ────────────────────────────────────────────────────────
@@ -147,8 +150,7 @@ function parseShopeeRow(row: Record<string, any>): any | null {
     _preco_unitario:  precoUnitario,
     _preco_original:  precoOriginal,
     valor_bruto:     valorBruto,
-    taxa_shopee:     comissaoShopee,     // Shopee Commission (real)
-    taxas_shopee:    taxaShopee,
+    comissao_shopee: taxaShopeeTotal,    // Cupom + Comissão + Taxa Serviço
     valor_liquido:   valorLiquido,       // Final Amount Received (real)
     
     
@@ -277,7 +279,6 @@ export default function FinanceiroPage() {
       desconto:        p.desconto || 0,
       frete:           p.frete || 0,
       comissao_shopee: p.comissao_shopee || 0,
-      taxas_shopee:    p.taxas_shopee || 0,
       valor_liquido:   p.valor_liquido || 0,
     }))
 
@@ -349,22 +350,18 @@ export default function FinanceiroPage() {
     const taxaShopee = (r.comissao_shopee && r.comissao_shopee > 0)
       ? r.comissao_shopee
       : recBruta * TAXA_SHOPEE
-    const taxaFixa   = TAXA_FIXA
-    // Custo produto: usa banco se preenchido, senão calcula via sku_map + estoque
     const skuVenda = r.sku || ''
-    const custoProdCalc = calcCustoProduto(skuVenda, r.quantidade || 1)
-    const cProd      = (0 && 0 > 0) ? 0 : custoProdCalc
-    const cEmb       = 0
-    const imp        = recBruta * imposto
-    const custoTotal = taxaShopee + taxaFixa + cProd + cEmb + imp
+    const cProd    = calcCustoProduto(skuVenda, r.quantidade || 1)
+    const imp      = recBruta * imposto
+    const custoTotal = taxaShopee + cProd + imp
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
-    return { ...r, recBruta, taxaShopee, taxaFixa, custoProd: cProd, imp, custoTotal, lucroOp, margem }
+    return { ...r, recBruta, taxaShopee, custoProd: cProd, imp, custoTotal, lucroOp, margem }
   }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
   const totLuc  = filtered.reduce((s, r) => s + r.lucroOp,  0)
-  const totTaxa = filtered.reduce((s, r) => s + r.taxaShopee + r.taxaFixa, 0)
+  const totTaxa = filtered.reduce((s, r) => s + r.taxaShopee, 0)
   const totImp  = filtered.reduce((s, r) => s + r.imp, 0)
 
   if (loading) return (
@@ -513,7 +510,7 @@ export default function FinanceiroPage() {
       {/* TABELA PRINCIPAL */}
       <div style={S.card}>
         <Table
-          headers={['Data', 'Loja', 'Pedido', 'SKU', 'Produto', 'Qtd', 'Vl Unit', 'Rec Bruta', 'Taxa Shop', 'Taxa Fixa', 'Custo Prod', 'Imposto', 'Custo Total', 'Lucro Op', 'Margem', '']}
+          headers={['Data', 'Loja', 'Pedido', 'SKU', 'Produto', 'Qtd', 'Vl Unit', 'Rec Bruta', 'Taxa Shop', 'Custo Prod', 'Imposto', 'Custo Total', 'Lucro Op', 'Margem', '']}
           rows={filtered.map(p => [
             D(p.data),
             <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
@@ -524,7 +521,6 @@ export default function FinanceiroPage() {
             R(p.quantidade > 0 ? p.recBruta / p.quantidade : 0),
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.recBruta)}</span>,
             <span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(p.taxaShopee)}</span>,
-            <span style={{ fontFamily: 'monospace' }}>{R(p.taxaFixa)}</span>,
             <span style={{ fontFamily: 'monospace' }}>{R(p.custoProd || 0)}</span>,
             <span style={{ fontFamily: 'monospace' }}>{R(p.imp)}</span>,
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.custoTotal)}</span>,
