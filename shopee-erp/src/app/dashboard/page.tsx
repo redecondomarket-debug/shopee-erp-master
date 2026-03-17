@@ -161,7 +161,7 @@ export default function DashboardPage() {
     const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
     const taxas = lp.reduce((s, f) => {
       const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE
-      return s + ts + TAXA_FIXA
+      return s + ts
     }, 0)
     const cprod = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
     const mc    = rec - taxas - cprod
