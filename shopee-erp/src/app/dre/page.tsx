@@ -32,6 +32,7 @@ function Badge({ children, color = '#ff6600' }: { children: React.ReactNode; col
 function StatusBadge({ v }: { v: number }) {
   if (v >= 0.20) return <Badge color="#22c55e">▲ {P(v)}</Badge>
   if (v >= 0.10) return <Badge color="#f59e0b">● {P(v)}</Badge>
+  if (v >= 0)    return <Badge color="#f59e0b">● {P(v)}</Badge>
   return <Badge color="#ef4444">▼ {P(v)}</Badge>
 }
 
