@@ -45,7 +45,16 @@ export default function DREPage() {
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
-  const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
+  const [imposto,    setImposto]    = useState(() => {
+    if (typeof window === 'undefined') return DEFAULT_IMPOSTO
+    const saved = localStorage.getItem('erp_imposto')
+    return saved ? parseFloat(saved) : DEFAULT_IMPOSTO
+  })
+  const [impostoInput, setImpostoInput] = useState(() => {
+    if (typeof window === 'undefined') return (DEFAULT_IMPOSTO * 100).toFixed(1)
+    const saved = localStorage.getItem('erp_imposto')
+    return saved ? (parseFloat(saved) * 100).toFixed(1) : (DEFAULT_IMPOSTO * 100).toFixed(1)
+  })
   const [expanded,   setExpanded]   = useState<string | null>(null)
   const [modo,       setModo]       = useState<'resumido' | 'porLoja'>('resumido')
   const [periodo,    setPeriodo]    = useState('personalizado')
@@ -196,9 +205,16 @@ export default function DREPage() {
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
-          <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
+          <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
             style={{ ...S.inp, width: 60, textAlign: 'center' as any }} step="0.1" />
           <span style={{ fontSize: 11, color: '#888' }}>%</span>
+          <button onClick={() => {
+            const v = parseFloat(impostoInput) / 100
+            setImposto(v)
+            localStorage.setItem('erp_imposto', String(v))
+          }} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>
+            ✓ OK
+          </button>
         </div>
       </div>
 
