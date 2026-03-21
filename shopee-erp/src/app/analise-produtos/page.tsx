@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTaxRate } from '@/hooks/useTaxRate'
 
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 const LOJA_COLORS: Record<string, string> = {
@@ -9,8 +10,6 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA   = 4.05
-const DEFAULT_IMPOSTO = 0.06
 
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
@@ -49,62 +48,86 @@ function MiniBar({ data, height = 100, colorFn }: { data: { l: string; v: number
 export default function AnaliseProdutosPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
+  const [skuMapData, setSkuMapData] = useState<any[]>([])
+  const [estoque,    setEstoque]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [busca,      setBusca]      = useState('')
-  const [ordenar,    setOrdenar]    = useState<'rec'|'qtd'|'lucro'|'margem'>('rec')
-  const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
+  const [ordenar,    setOrdenar]    = useState<'rec' | 'qtd' | 'lucro' | 'margem'>('rec')
+
+  // FIX: hook centralizado — lê e salva no localStorage, mesmo valor de todas as páginas
+  const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
-    const [finRes, adsRes] = await Promise.all([
+    const [finRes, adsRes, mapRes, estRes] = await Promise.all([
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('ads').select('*'),
+      supabase.from('sku_map').select('*'),
+      supabase.from('estoque').select('*'),
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
+    setSkuMapData(mapRes.data || [])
+    setEstoque(estRes.data || [])
     setLoading(false)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
     if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return false
     if (dateFrom && f.data < dateFrom) return false
-    if (dateTo   && f.data > dateTo)   return false
+    if (dateTo && f.data > dateTo) return false
     return true
   }), [financeiro, lojaFiltro, dateFrom, dateTo])
 
   const adsF = useMemo(() => ads.filter(a => {
     if (lojaFiltro !== 'Todas' && a.loja !== lojaFiltro) return false
     if (dateFrom && a.data < dateFrom) return false
-    if (dateTo   && a.data > dateTo)   return false
+    if (dateTo && a.data > dateTo) return false
     return true
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
   const totalAds = adsF.reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
 
-  // Agregação por SKU (idêntico ao TabAnaliseProd do App.js)
   const skuMap = useMemo(() => {
     const map: Record<string, any> = {}
     finF.forEach(f => {
       const sku = f.sku || 'SEM SKU'
-      if (!map[sku]) map[sku] = { sku, nome: f.nome_produto || sku, rec: 0, lucro: 0, qtd: 0, lojas: new Set<string>() }
-      const rec    = f.valor_bruto || 0
-      const cProd  = f.custo_produto || 0
-      const cEmb   = f.custo_embalagem || 0
-      const taxas  = rec * TAXA_SHOPEE + TAXA_FIXA
-      const imp    = rec * imposto
-      const lucro  = rec - taxas - cProd - cEmb - imp
+      if (!map[sku]) map[sku] = { sku, nome: f.nome_produto || f.produto || sku, rec: 0, lucro: 0, qtd: 0, lojas: new Set<string>() }
+
+      const rec   = f.valor_bruto || 0
+      // taxa real do banco quando disponível
+      const taxas = (f.comissao_shopee && f.comissao_shopee > 0)
+        ? f.comissao_shopee
+        : rec * TAXA_SHOPEE
+
+      // custo produto: banco tem prioridade, senão cruza sku_map + estoque
+      let cProd = (f.custo_produto && f.custo_produto > 0) ? f.custo_produto : 0
+      if (!cProd) {
+        const comps = skuMapData.filter(m => m.sku_venda === sku)
+        cProd = comps.reduce((t, c) => {
+          const prod = estoque.find(e => e.sku_base === c.sku_base)
+          return t + (prod?.custo || 0) * (c.quantidade || 1) * (f.quantidade || 1)
+        }, 0)
+      }
+
+      // FIX: inclui custo embalagem (estava faltando)
+      const cEmb = f.custo_embalagem || 0
+      // FIX: imposto do hook
+      const imp   = rec * imposto
+      const lucro = rec - taxas - cProd - cEmb - imp
+
       map[sku].rec   += rec
       map[sku].lucro += lucro
       map[sku].qtd   += f.quantidade || 1
       map[sku].lojas.add(f.loja || '')
     })
     return map
-  }, [finF, imposto])
+  }, [finF, imposto, skuMapData, estoque])
 
   const totalRec = Object.values(skuMap).reduce((s: number, r: any) => s + r.rec, 0)
 
@@ -112,10 +135,9 @@ export default function AnaliseProdutosPage() {
     return Object.values(skuMap)
       .map((s: any) => ({
         ...s,
-        margem: s.rec > 0 ? s.lucro / s.rec : 0,
-        // Rateio de Ads proporcional ao faturamento (igual ao App.js analise_prod)
+        margem:     s.rec > 0 ? s.lucro / s.rec : 0,
         adsRateado: totalRec > 0 ? (s.rec / totalRec) * totalAds : 0,
-        lucroLiq: s.lucro - (totalRec > 0 ? (s.rec / totalRec) * totalAds : 0),
+        lucroLiq:   s.lucro - (totalRec > 0 ? (s.rec / totalRec) * totalAds : 0),
       }))
       .filter(s => !busca || s.sku.toLowerCase().includes(busca.toLowerCase()) || s.nome.toLowerCase().includes(busca.toLowerCase()))
       .sort((a: any, b: any) => b[ordenar] - a[ordenar])
@@ -133,11 +155,13 @@ export default function AnaliseProdutosPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>🔍 Análise de Produtos — Desempenho por SKU</h2>
+        {/* FIX: input de imposto salva no localStorage via hook */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
-          <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
+          <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
             style={{ ...S.inp, width: 55, textAlign: 'center' as any }} step="0.1" />
           <span style={{ fontSize: 11, color: '#888' }}>%</span>
+          <button onClick={() => salvarImposto()} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 5, padding: '4px 8px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>✓</button>
         </div>
       </div>
 
@@ -155,12 +179,7 @@ export default function AnaliseProdutosPage() {
         )}
         <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
           {[['rec', '$ Receita'], ['qtd', '# Qtd'], ['lucro', '✓ Lucro'], ['margem', '% Margem']].map(([id, label]) => (
-            <button key={id} onClick={() => setOrdenar(id as any)} style={{
-              background: ordenar === id ? '#ff660033' : 'transparent',
-              border: `1px solid ${ordenar === id ? '#ff6600' : '#2a2a3a'}`,
-              color: ordenar === id ? '#ff6600' : '#555',
-              borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: ordenar === id ? 700 : 400
-            }}>{label}</button>
+            <button key={id} onClick={() => setOrdenar(id as any)} style={{ background: ordenar === id ? '#ff660033' : 'transparent', border: `1px solid ${ordenar === id ? '#ff6600' : '#2a2a3a'}`, color: ordenar === id ? '#ff6600' : '#555', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11, fontWeight: ordenar === id ? 700 : 400 }}>{label}</button>
           ))}
         </div>
       </div>
@@ -180,10 +199,7 @@ export default function AnaliseProdutosPage() {
           <MiniBar
             data={top10.map((s: any) => ({ l: s.sku, v: ordenar === 'margem' ? s.margem * 100 : s[ordenar] }))}
             height={130}
-            colorFn={i => {
-              const m = top10[i]?.margem || 0
-              return m >= 0.20 ? '#22c55e' : m >= 0.10 ? '#f59e0b' : '#ef4444'
-            }}
+            colorFn={i => { const m = top10[i]?.margem || 0; return m >= 0.20 ? '#22c55e' : m >= 0.10 ? '#f59e0b' : '#ef4444' }}
           />
         </div>
 
@@ -192,12 +208,12 @@ export default function AnaliseProdutosPage() {
           <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📈 Resumo Geral</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {[
-              ['SKUs Únicos',     String(rows.length),                         '#a78bfa'],
-              ['Receita Total',   R(rows.reduce((s: any, r: any) => s + r.rec, 0)),  '#ff9933'],
-              ['Lucro Op Total',  R(rows.reduce((s: any, r: any) => s + r.lucro, 0)), rows.reduce((s: any, r: any) => s + r.lucro, 0) >= 0 ? '#22c55e' : '#ef4444'],
-              ['Total Ads',       R(totalAds),                                '#e67e22'],
-              ['Lucro Líq Real',  R(rows.reduce((s: any, r: any) => s + r.lucroLiq, 0)), rows.reduce((s: any, r: any) => s + r.lucroLiq, 0) >= 0 ? '#22c55e' : '#ef4444'],
-              ['Margem Média',    P(rows.reduce((s: any, r: any) => s + r.margem, 0) / (rows.length || 1)), '#888'],
+              ['SKUs Únicos',    String(rows.length),                                                        '#a78bfa'],
+              ['Receita Total',  R(rows.reduce((s: any, r: any) => s + r.rec, 0)),                           '#ff9933'],
+              ['Lucro Op Total', R(rows.reduce((s: any, r: any) => s + r.lucro, 0)),                         rows.reduce((s: any, r: any) => s + r.lucro, 0) >= 0 ? '#22c55e' : '#ef4444'],
+              ['Total Ads',      R(totalAds),                                                                '#e67e22'],
+              ['Lucro Líq Real', R(rows.reduce((s: any, r: any) => s + r.lucroLiq, 0)),                      rows.reduce((s: any, r: any) => s + r.lucroLiq, 0) >= 0 ? '#22c55e' : '#ef4444'],
+              ['Margem Média',   P(rows.reduce((s: any, r: any) => s + r.margem, 0) / (rows.length || 1)),   '#888'],
             ].map(([l, v, c]) => (
               <div key={l as string} style={{ padding: '10px 12px', background: '#13131e', borderRadius: 6 }}>
                 <div style={{ fontSize: 10, color: '#555', textTransform: 'uppercase', letterSpacing: 0.8 }}>{l}</div>
@@ -213,11 +229,7 @@ export default function AnaliseProdutosPage() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>
-                {['#', 'SKU Venda', 'Produto', 'Qtd Vendida', 'Receita Total', 'Lucro Op', 'Ads Rateado', 'Lucro Líq', 'Margem Op', 'Lojas'].map(h => (
-                  <th key={h} style={S.th as any}>{h}</th>
-                ))}
-              </tr>
+              <tr>{['#', 'SKU Venda', 'Produto', 'Qtd Vendida', 'Receita Total', 'Lucro Op', 'Ads Rateado', 'Lucro Líq', 'Margem Op', 'Lojas'].map(h => <th key={h} style={S.th as any}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {rows.map((s: any, i: number) => (
@@ -247,6 +259,7 @@ export default function AnaliseProdutosPage() {
           </table>
         </div>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
