@@ -123,7 +123,7 @@ export default function DREPage() {
         const calc = calcCustoProd(sku, f.quantidade || 1)
         return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
       }, 0)
-      const cemb = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+      const cemb = 0 // embalagem já inclusa em calcCustoProd via estoque
       // FIX: imposto do hook
       const imp   = rec * imposto
       const lucOp = rec - taxas - cprod - cemb - imp
@@ -151,7 +151,7 @@ export default function DREPage() {
           const calc = calcCustoProd(sku, f.quantidade || 1)
           return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
         }, 0)
-        const ce2 = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+        const ce2 = 0 // embalagem já inclusa em calcCustoProd via estoque
         const mc2 = r2 - t2 - cp2 - ce2
         const lo2 = mc2 - i2
         const g2  = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.investimento || 0), 0)
