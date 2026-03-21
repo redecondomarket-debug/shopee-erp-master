@@ -116,7 +116,7 @@ export default function AnaliseProdutosPage() {
       }
 
       // FIX: inclui custo embalagem (estava faltando)
-      const cEmb = f.custo_embalagem || 0
+      const cEmb = 0 // embalagem já inclusa em calcCustoProd via estoque
       // FIX: imposto do hook
       const imp   = rec * imposto
       const lucro = rec - taxas - cProd - cEmb - imp
