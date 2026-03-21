@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTaxRate } from '@/hooks/useTaxRate'
 
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 const LOJA_COLORS: Record<string, string> = {
@@ -9,19 +10,18 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA = 4.00
 
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
 const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
 
 const S: Record<string, React.CSSProperties> = {
-  card:      { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
-  th:        { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
-  td:        { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
-  inp:       { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
-  btn:       { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
-  btnSm:     { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  card:  { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:    { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:    { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:   { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
+  btn:   { background: '#ff6600', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', cursor: 'pointer', fontWeight: 700, fontSize: 13 },
+  btnSm: { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
 }
 
 function Badge({ children, color = '#ff6600' }: { children: React.ReactNode; color?: string }) {
@@ -80,12 +80,15 @@ export default function DashboardPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
   const [estoque,    setEstoque]    = useState<any[]>([])
-  const [skuMap,     setSkuMap]     = useState<any[]>([])
+  const [skuMapData, setSkuMapData] = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [periodo,    setPeriodo]    = useState('personalizado')
+
+  // FIX: imposto lido do localStorage via hook centralizado (era hardcoded 0.06)
+  const { imposto } = useTaxRate()
 
   useEffect(() => { loadData() }, [])
 
@@ -100,42 +103,45 @@ export default function DashboardPage() {
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
     setEstoque(estRes.data || [])
-    setSkuMap(mapRes.data || [])
+    setSkuMapData(mapRes.data || [])
     setLoading(false)
   }
 
   function aplicarPeriodo(p: string) {
     setPeriodo(p)
     const hoje = new Date()
-    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    const fmt = (d: Date) => d.toISOString().slice(0, 10)
     if (p === 'hoje') { setDateFrom(fmt(hoje)); setDateTo(fmt(hoje)) }
-    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate()-1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
-    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate()-6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
-    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate()-29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate() - 1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
+    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate() - 6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate() - 29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
     else if (p === 'tudo') { setDateFrom(''); setDateTo('') }
   }
 
   function calcCustoProd(skuVendido: string, quantidade: number): number {
     if (!skuVendido) return 0
-    const comps = skuMap.filter(m => m.sku_venda === skuVendido)
+    const comps = skuMapData.filter(m => m.sku_venda === skuVendido)
     if (!comps.length) return 0
-    return comps.reduce((t, c) => {
+    const custoProd = comps.reduce((t, c) => {
       const prod = estoque.find(e => e.sku_base === c.sku_base)
       return t + (prod?.custo || 0) * (c.quantidade || 1) * quantidade
     }, 0)
+    // custo_embalagem é cadastrado separado do custo unitário (ver aba Produtos Base)
+    const prodPrincipal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
+    return custoProd + (prodPrincipal?.custo_embalagem || 0)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
     if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return false
     if (dateFrom && f.data < dateFrom) return false
-    if (dateTo   && f.data > dateTo)   return false
+    if (dateTo && f.data > dateTo) return false
     return true
   }), [financeiro, lojaFiltro, dateFrom, dateTo])
 
   const adsF = useMemo(() => ads.filter(a => {
     if (lojaFiltro !== 'Todas' && a.loja !== lojaFiltro) return false
     if (dateFrom && a.data < dateFrom) return false
-    if (dateTo   && a.data > dateTo)   return false
+    if (dateTo && a.data > dateTo) return false
     return true
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
@@ -147,7 +153,8 @@ export default function DashboardPage() {
   const totalCprod = finF.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
   const totalMC    = totalRec - totalTaxas - totalCprod
   const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
-  const totalImp   = totalRec * 0.06
+  // FIX: imposto do hook, não hardcoded 0.06
+  const totalImp   = totalRec * imposto
   const totalLucOp = totalMC - totalImp
   const totalAds   = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
   const lucroLiq   = totalLucOp - totalAds
@@ -156,6 +163,7 @@ export default function DashboardPage() {
   const pedSet     = new Set(finF.map(f => f.pedido)).size
   const ticket     = pedSet > 0 ? totalRec / pedSet : 0
 
+  // FIX: porLoja também usa imposto do hook, não hardcoded 0.06
   const porLoja = LOJAS.map(loja => {
     const lp    = finF.filter(f => f.loja === loja)
     const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
@@ -165,7 +173,7 @@ export default function DashboardPage() {
     }, 0)
     const cprod = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
     const mc    = rec - taxas - cprod
-    const imp   = rec * 0.06
+    const imp   = rec * imposto
     const lucOp = mc - imp
     const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.investimento || 0), 0)
     const ll    = lucOp - gads
@@ -178,13 +186,13 @@ export default function DashboardPage() {
     if (!skuAgg[sku]) skuAgg[sku] = { sku, nome: f.produto || sku, rec: 0, lucro: 0, qtd: 0 }
     skuAgg[sku].rec   += f.valor_bruto || 0
     skuAgg[sku].lucro += calcCustoProd(f.sku || '', f.quantidade || 1)
-    skuAgg[sku].qtd   += f.quantidade  || 1
+    skuAgg[sku].qtd   += f.quantidade || 1
   })
   const topSkus = Object.values(skuAgg).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
 
   const byDay: Record<string, number> = {}
   finF.forEach(f => { byDay[f.data] = (byDay[f.data] || 0) + (f.valor_bruto || 0) })
-  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
+  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8, 10) + '/' + d.slice(5, 7), v }))
 
   const criticos = estoque.filter(e => (e.estoque_atual || 0) <= (e.estoque_minimo || 0))
 
@@ -195,7 +203,7 @@ export default function DashboardPage() {
   )
 
   return (
-    <div style={{ padding: "20px 24px", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: '20px 24px', width: '100%', boxSizing: 'border-box' }}>
       {/* FILTROS */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -204,23 +212,12 @@ export default function DashboardPage() {
             const ativo = lojaFiltro === l
             const label = l === 'Todas' ? 'Todas' : l === 'KL MARKET' ? 'KL' : l === 'UNIVERSO DOS ACHADOS' ? 'UNIVERSO' : 'MUNDO'
             return (
-              <button key={l} onClick={() => setLojaFiltro(l)} style={{
-                background: ativo ? cor + '33' : 'transparent',
-                border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
-                color: ativo ? cor : '#555',
-                borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-                fontSize: 12, fontWeight: ativo ? 700 : 400,
-              }}>{label}</button>
+              <button key={l} onClick={() => setLojaFiltro(l)} style={{ background: ativo ? cor + '33' : 'transparent', border: `1px solid ${ativo ? cor : '#2a2a3a'}`, color: ativo ? cor : '#555', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: ativo ? 700 : 400 }}>{label}</button>
             )
           })}
         </div>
-        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
-          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
-            background: periodo === p ? '#ff6600' : '#13131e',
-            color: periodo === p ? '#fff' : '#9090aa',
-            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
-            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
-          }}>
+        {(['hoje', 'ontem', 'semana', 'mes', 'tudo', 'personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{ background: periodo === p ? '#ff6600' : '#13131e', color: periodo === p ? '#fff' : '#9090aa', border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`, borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>
             {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
           </button>
         ))}
@@ -234,12 +231,12 @@ export default function DashboardPage() {
 
       {/* KPIs */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI icon="💰" label="Faturamento Total"        value={R(totalRec)}                    color="#ff9933"                                                          sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
-        <KPI icon="📊" label="Margem de Contribuição"   value={`${R(totalMC)} · ${P(mcPct)}`}  color={mcPct >= 0.30 ? '#a78bfa' : mcPct >= 0.15 ? '#f59e0b' : '#ef4444'} sub="Receita − Custos Variáveis" />
-        <KPI icon="✅" label="Lucro Líquido Real"       value={R(lucroLiq)}                    color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'}                            sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
-        <KPI icon="📈" label="Margem Líquida"           value={P(margemLiq)}                   color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
-        <KPI icon="⚡" label="ROAS Geral"               value={`${roas.toFixed(2)}x`}          color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'}       sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
-        <KPI icon="🛒" label="Total de Pedidos"         value={N(pedSet)}                      color="#a78bfa"                                                          sub={`Ticket médio: ${R(ticket)}`} />
+        <KPI icon="💰" label="Faturamento Total"      value={R(totalRec)}                   color="#ff9933" sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
+        <KPI icon="📊" label="Margem de Contribuição" value={`${R(totalMC)} · ${P(mcPct)}`} color={mcPct >= 0.30 ? '#a78bfa' : mcPct >= 0.15 ? '#f59e0b' : '#ef4444'} sub="Receita − Custos Variáveis" />
+        <KPI icon="✅" label="Lucro Líquido Real"     value={R(lucroLiq)}                   color={lucroLiq >= 0 ? '#22c55e' : '#ef4444'} sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
+        <KPI icon="📈" label="Margem Líquida"         value={P(margemLiq)}                  color={margemLiq > .15 ? '#22c55e' : margemLiq > .05 ? '#f59e0b' : '#ef4444'} sub="sobre receita bruta" />
+        <KPI icon="⚡" label="ROAS Geral"             value={`${roas.toFixed(2)}x`}         color={roas >= 2 ? '#22c55e' : roas >= 1 ? '#f59e0b' : '#ef4444'} sub={roas >= 2 ? 'Eficiente' : roas >= 1 ? 'Atenção' : 'Abaixo do ideal'} />
+        <KPI icon="🛒" label="Total de Pedidos"       value={N(pedSet)}                     color="#a78bfa" sub={`Ticket médio: ${R(ticket)}`} />
       </div>
 
       {/* Resultado por Loja + Gráfico Dia */}
@@ -263,10 +260,7 @@ export default function DashboardPage() {
         </div>
         <div style={S.card}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>📅 Faturamento por Dia</div>
-          {dayChart.length > 0
-            ? <MiniBar data={dayChart} height={130} />
-            : <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>
-          }
+          {dayChart.length > 0 ? <MiniBar data={dayChart} height={130} /> : <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>}
         </div>
       </div>
 
