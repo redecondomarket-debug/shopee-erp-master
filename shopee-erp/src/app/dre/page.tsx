@@ -1,8 +1,8 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTaxRate } from '@/hooks/useTaxRate'
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 const LOJA_COLORS: Record<string, string> = {
   'KL MARKET': '#ff6600',
@@ -10,10 +10,8 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA   = 4.00
-const DEFAULT_IMPOSTO = 0.06
 
-const D = (s: string) => { if (!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m && y ? `${d}/${m}/${y}` : s }
+const D = (s: string) => { if (!s) return ''; const [y, m, d] = String(s).slice(0, 10).split('-'); return d && m && y ? `${d}/${m}/${y}` : s }
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
 const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
@@ -45,19 +43,12 @@ export default function DREPage() {
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
-  const [imposto,    setImposto]    = useState(() => {
-    if (typeof window === 'undefined') return DEFAULT_IMPOSTO
-    const saved = localStorage.getItem('erp_imposto')
-    return saved ? parseFloat(saved) : DEFAULT_IMPOSTO
-  })
-  const [impostoInput, setImpostoInput] = useState(() => {
-    if (typeof window === 'undefined') return (DEFAULT_IMPOSTO * 100).toFixed(1)
-    const saved = localStorage.getItem('erp_imposto')
-    return saved ? (parseFloat(saved) * 100).toFixed(1) : (DEFAULT_IMPOSTO * 100).toFixed(1)
-  })
   const [expanded,   setExpanded]   = useState<string | null>(null)
   const [modo,       setModo]       = useState<'resumido' | 'porLoja'>('resumido')
   const [periodo,    setPeriodo]    = useState('personalizado')
+
+  // FIX: hook centralizado — mesmo valor do Financeiro e demais páginas
+  const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   useEffect(() => { loadData() }, [])
 
@@ -79,11 +70,11 @@ export default function DREPage() {
   function aplicarPeriodo(p: string) {
     setPeriodo(p)
     const hoje = new Date()
-    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    const fmt = (d: Date) => d.toISOString().slice(0, 10)
     if (p === 'hoje') { setDateFrom(fmt(hoje)); setDateTo(fmt(hoje)) }
-    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate()-1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
-    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate()-6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
-    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate()-29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate() - 1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
+    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate() - 6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate() - 29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
     else if (p === 'tudo') { setDateFrom(''); setDateTo('') }
   }
 
@@ -102,18 +93,17 @@ export default function DREPage() {
   const finF = useMemo(() => financeiro.filter(f => {
     if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return false
     if (dateFrom && f.data < dateFrom) return false
-    if (dateTo   && f.data > dateTo)   return false
+    if (dateTo && f.data > dateTo) return false
     return true
   }), [financeiro, lojaFiltro, dateFrom, dateTo])
 
   const adsF = useMemo(() => ads.filter(a => {
     if (lojaFiltro !== 'Todas' && a.loja !== lojaFiltro) return false
     if (dateFrom && a.data < dateFrom) return false
-    if (dateTo   && a.data > dateTo)   return false
+    if (dateTo && a.data > dateTo) return false
     return true
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
-  // ── Calcular linhas por dia×loja (idêntico ao TabDRE do App.js) ──────────
   const rows = useMemo(() => {
     const keys = Array.from(new Set(finF.map(f => modo === 'resumido' ? f.data : `${f.data}||${f.loja}`)))
     return keys.sort().reverse().map(k => {
@@ -129,43 +119,42 @@ export default function DREPage() {
         return s + ts
       }, 0)
       const cprod = lp.reduce((s, f) => {
-        const sku = f.sku || ''
+        const sku  = f.sku || ''
         const calc = calcCustoProd(sku, f.quantidade || 1)
         return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
       }, 0)
-      const cemb  = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+      const cemb = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+      // FIX: imposto do hook
       const imp   = rec * imposto
       const lucOp = rec - taxas - cprod - cemb - imp
       const gads  = (modo === 'resumido'
         ? adsF.filter(a => a.data === data)
         : adsF.filter(a => a.data === data && a.loja === loja)
       ).reduce((s, a) => s + (a.investimento || 0), 0)
-      const ll     = lucOp - gads
-      const peds   = new Set(lp.map(f => f.pedido)).size
+      const ll    = lucOp - gads
+      const peds  = new Set(lp.map(f => f.pedido)).size
+      const mc    = rec - taxas - cprod - cemb
+      const mcPct = rec > 0 ? mc / rec : 0
 
-      const mc     = rec - taxas - cprod - cemb   // MC = Receita - Custos Variáveis (sem imposto e ads)
-      const mcPct  = rec > 0 ? mc / rec : 0
-
-      // Por loja (para modo resumido expandido)
       const porLoja = LOJAS.map(l => {
-        const lf    = finF.filter(f => f.data === data && f.loja === l)
-        const r2    = lf.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-        const t2    = lf.reduce((s, f) => {
+        const lf  = finF.filter(f => f.data === data && f.loja === l)
+        const r2  = lf.reduce((s, f) => s + (f.valor_bruto || 0), 0)
+        const t2  = lf.reduce((s, f) => {
           const rb = f.valor_bruto || 0
           const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : rb * TAXA_SHOPEE
-          const tf = TAXA_FIXA
-          return s + ts + tf
+          return s + ts
         }, 0)
-        const i2    = r2 * imposto
-        const cp2   = lf.reduce((s, f) => {
-          const sku = f.sku || ''
+        // FIX: imposto do hook
+        const i2  = r2 * imposto
+        const cp2 = lf.reduce((s, f) => {
+          const sku  = f.sku || ''
           const calc = calcCustoProd(sku, f.quantidade || 1)
           return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
         }, 0)
-        const ce2   = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
-        const mc2   = r2 - t2 - cp2 - ce2
-        const lo2   = mc2 - i2
-        const g2    = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.investimento || 0), 0)
+        const ce2 = lf.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+        const mc2 = r2 - t2 - cp2 - ce2
+        const lo2 = mc2 - i2
+        const g2  = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.investimento || 0), 0)
         return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.pedido)).size }
       })
 
@@ -176,7 +165,6 @@ export default function DREPage() {
   const tot = useMemo(() => {
     const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
     rows.forEach(r => Object.keys(t).forEach(k => (t as any)[k] += (r as any)[k] || 0))
-    // Sobrescrever gads com total real de adsF (inclui dias sem pedidos)
     const totalGadsReal = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
     const totalLLReal   = t.lucOp - totalGadsReal
     return { ...t, gads: totalGadsReal, ll: totalLLReal, mcPct: t.rec > 0 ? t.mc / t.rec : 0 }
@@ -189,30 +177,22 @@ export default function DREPage() {
   )
 
   return (
-    <div style={{ padding: "24px 28px", maxWidth: 1400, margin: "0 auto", width: "100%" }}>
+    <div style={{ padding: '24px 28px', maxWidth: 1400, margin: '0 auto', width: '100%' }}>
       {/* HEADER */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
         <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📊 DRE Diário — Resultado Consolidado</h2>
         <div style={{ display: 'flex', gap: 4 }}>
-          {[['resumido', '📅 Resumido'], ['porLoja', '🏪 Por Loja']] .map(([id, label]) => (
-            <button key={id} onClick={() => setModo(id as any)} style={{
-              background: modo === id ? '#ff660033' : 'transparent',
-              border: `1px solid ${modo === id ? '#ff6600' : '#2a2a3a'}`,
-              color: modo === id ? '#ff6600' : '#555',
-              borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: modo === id ? 700 : 400
-            }}>{label}</button>
+          {[['resumido', '📅 Resumido'], ['porLoja', '🏪 Por Loja']].map(([id, label]) => (
+            <button key={id} onClick={() => setModo(id as any)} style={{ background: modo === id ? '#ff660033' : 'transparent', border: `1px solid ${modo === id ? '#ff6600' : '#2a2a3a'}`, color: modo === id ? '#ff6600' : '#555', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: modo === id ? 700 : 400 }}>{label}</button>
           ))}
         </div>
+        {/* FIX: salvarImposto do hook garante sync entre todas as páginas */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
           <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
             style={{ ...S.inp, width: 60, textAlign: 'center' as any }} step="0.1" />
           <span style={{ fontSize: 11, color: '#888' }}>%</span>
-          <button onClick={() => {
-            const v = parseFloat(impostoInput) / 100
-            setImposto(v)
-            localStorage.setItem('erp_imposto', String(v))
-          }} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>
+          <button onClick={() => salvarImposto()} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>
             ✓ OK
           </button>
         </div>
@@ -224,13 +204,8 @@ export default function DREPage() {
           <option value="Todas">Todas as lojas</option>
           {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
-          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
-            background: periodo === p ? '#ff6600' : '#13131e',
-            color: periodo === p ? '#fff' : '#9090aa',
-            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
-            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
-          }}>
+        {(['hoje', 'ontem', 'semana', 'mes', 'tudo', 'personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{ background: periodo === p ? '#ff6600' : '#13131e', color: periodo === p ? '#fff' : '#9090aa', border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`, borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>
             {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
           </button>
         ))}
@@ -244,13 +219,13 @@ export default function DREPage() {
       {/* KPIs */}
       <div style={{ ...S.card, marginBottom: 16, display: 'flex', gap: 24, flexWrap: 'wrap', padding: '12px 16px' }}>
         {[
-          ['Receita Total',          R(tot.rec),                                       '#ff9933'],
-          ['Margem de Contribuição', `${R(tot.mc)} (${P(tot.mcPct)})`,                 tot.mcPct >= 0.30 ? '#22c55e' : tot.mcPct >= 0.15 ? '#f59e0b' : '#ef4444'],
-          ['Lucro Líquido Real',     R(tot.ll),                                        tot.ll >= 0 ? '#22c55e' : '#ef4444'],
-          ['Taxas Shopee',           R(tot.taxas),                                     '#f59e0b'],
-          ['Custo Produtos',         R(tot.cprod),                                     '#888'],
-          ['Impostos',               R(tot.imp),                                       '#666'],
-          ['Gasto Ads Total',        R(tot.gads),                                      '#e67e22'],
+          ['Receita Total',          R(tot.rec),                              '#ff9933'],
+          ['Margem de Contribuição', `${R(tot.mc)} (${P(tot.mcPct)})`,        tot.mcPct >= 0.30 ? '#22c55e' : tot.mcPct >= 0.15 ? '#f59e0b' : '#ef4444'],
+          ['Lucro Líquido Real',     R(tot.ll),                               tot.ll >= 0 ? '#22c55e' : '#ef4444'],
+          ['Taxas Shopee',           R(tot.taxas),                            '#f59e0b'],
+          ['Custo Produtos',         R(tot.cprod),                            '#888'],
+          ['Impostos',               R(tot.imp),                              '#666'],
+          ['Gasto Ads Total',        R(tot.gads),                             '#e67e22'],
         ].map(([l, v, c]) => (
           <div key={l as string}>
             <div style={{ fontSize: 10, color: '#555', textTransform: 'uppercase', letterSpacing: 0.8 }}>{l}</div>
@@ -271,7 +246,7 @@ export default function DREPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {rows.map((r) => (
                 <>
                   <tr key={r.data + (r.loja || '')}
                     onClick={() => modo === 'resumido' && setExpanded(expanded === r.data ? null : r.data)}
@@ -281,9 +256,7 @@ export default function DREPage() {
                       <span style={{ fontFamily: 'monospace' }}>{D(r.data)}</span>
                       {modo === 'resumido' && <span style={{ marginLeft: 6, fontSize: 10, color: '#555' }}>{expanded === r.data ? '▲' : '▼'}</span>}
                     </td>
-                    {modo === 'porLoja' && (
-                      <td style={S.td as any}><span style={{ color: LOJA_COLORS[r.loja!] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{r.loja}</span></td>
-                    )}
+                    {modo === 'porLoja' && <td style={S.td as any}><span style={{ color: LOJA_COLORS[r.loja!] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{r.loja}</span></td>}
                     <td style={S.td as any}>{N(r.peds)}</td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace' }}>{R(r.rec)}</span></td>
                     <td style={S.td as any}><span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(r.taxas)}</span></td>
@@ -298,12 +271,9 @@ export default function DREPage() {
                     <td style={S.td as any}><StatusBadge v={r.margem} /></td>
                   </tr>
 
-                  {/* EXPANSÃO POR LOJA (modo resumido) */}
-                  {modo === 'resumido' && expanded === r.data && r.porLoja.filter(l => l.rec > 0).map(l => (
+                  {modo === 'resumido' && expanded === r.data && r.porLoja.filter((l: any) => l.rec > 0).map((l: any) => (
                     <tr key={l.loja} style={{ background: '#13131e', borderBottom: '1px solid #1e1e2a' }}>
-                      <td style={{ ...S.td as any, paddingLeft: 28, fontSize: 11 }}>
-                        <span style={{ color: LOJA_COLORS[l.loja], fontWeight: 700 }}>↳ {l.loja}</span>
-                      </td>
+                      <td style={{ ...S.td as any, paddingLeft: 28, fontSize: 11 }}><span style={{ color: LOJA_COLORS[l.loja], fontWeight: 700 }}>↳ {l.loja}</span></td>
                       <td style={S.td as any}>{N(l.peds)}</td>
                       <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11 }}>{R(l.rec)}</span></td>
                       <td style={S.td as any}><span style={{ fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{R(l.taxas)}</span></td>
@@ -321,7 +291,6 @@ export default function DREPage() {
                 </>
               ))}
 
-              {/* LINHA TOTAL */}
               <tr style={{ background: '#0f0f13', borderTop: '2px solid #2a2a3a' }}>
                 <td style={{ ...S.td as any, fontWeight: 800 }}>TOTAL GERAL</td>
                 {modo === 'porLoja' && <td style={S.td as any} />}
@@ -340,12 +309,13 @@ export default function DREPage() {
               </tr>
 
               {rows.length === 0 && (
-                <tr><td colSpan={12} style={{ ...S.td as any, textAlign: 'center', padding: 48, color: '#555' }}>Sem dados no período</td></tr>
+                <tr><td colSpan={14} style={{ ...S.td as any, textAlign: 'center', padding: 48, color: '#555' }}>Sem dados no período</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
