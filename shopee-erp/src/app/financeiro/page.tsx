@@ -1,9 +1,9 @@
 'use client'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTaxRate } from '@/hooks/useTaxRate'
 import * as XLSX from 'xlsx'
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 const LOJA_COLORS: Record<string, string> = {
   'KL MARKET': '#ff6600',
@@ -11,16 +11,12 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA   = 4.00
-const DEFAULT_IMPOSTO = 0.06
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
 const R  = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P  = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
-const D  = (s: string) => { if (!s) return ""; const [y,m,d] = String(s).slice(0,10).split("-"); return d && m && y ? `${d}/${m}/${y}` : s }
+const D  = (s: string) => { if (!s) return ''; const [y, m, d] = String(s).slice(0, 10).split('-'); return d && m && y ? `${d}/${m}/${y}` : s }
 const N  = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
 
-// ─── UI ATOMS ─────────────────────────────────────────────────────────────────
 const S: Record<string, React.CSSProperties> = {
   card:      { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
   th:        { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
@@ -64,102 +60,62 @@ function Toast({ msg, type, onClose }: { msg: string; type: string; onClose: () 
   )
 }
 
-// ─── CÁLCULO (idêntico ao App.js calcPed) ────────────────────────────────────
 function calcLinha(recBruta: number, custoProd: number, imposto: number) {
   const taxaShopee = recBruta * TAXA_SHOPEE
-  const taxaFixa   = TAXA_FIXA
   const imp        = recBruta * imposto
-  const custoTotal = taxaShopee + taxaFixa + custoProd + imp
+  const custoTotal = taxaShopee + custoProd + imp
   const lucroOp    = recBruta - custoTotal
   const margem     = recBruta > 0 ? lucroOp / recBruta : 0
-  return { taxaShopee, taxaFixa, imp, custoTotal, lucroOp, margem }
+  return { taxaShopee, imp, custoTotal, lucroOp, margem }
 }
 
-// ─── PARSER SHOPEE — lê por NOME de coluna (não por índice) ──────────────────
-// CORREÇÃO 1: sheet_to_json sem header:1 → cada linha é objeto keyed pelo cabeçalho
-// CORREÇÃO 2: usa "Agreed Price" como receita real (não "Original Price")
-// CORREÇÃO 3: usa taxas reais da planilha ("Shopee Commission" + "Shopee Fee")
 function parseShopeeRow(row: Record<string, any>): any | null {
-  // ── Pedido e status (EN + PT) ─────────────────────────────────────────────
   const numPedido = String(row['Order ID'] || row['ID do pedido'] || row['No. Pesanan'] || '').trim()
   const status    = String(row['Order Status'] || row['Status do pedido'] || row['Status Pesanan'] || '').trim()
-
-  // Status válidos — EN, PT e variações
   const statusUpper = status.toUpperCase()
   const statusInvalido = ['CANCELADO', 'CANCELLED', 'CANCELED']
   if (statusInvalido.some(s => statusUpper.includes(s))) return null
-  // Aceita qualquer status que não seja cancelado e tenha pedido
   if (!numPedido) return null
 
-  // ── Data (EN + PT) ────────────────────────────────────────────────────────
   const dataRaw = row['Order Creation Date'] || row['Data de criação do pedido'] || row['Tanggal Pembuatan Pesanan'] || ''
   let data = ''
   if (dataRaw) {
     const s = String(dataRaw).trim()
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-      data = s.slice(0, 10)
-    } else if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) {
-      const [d, m, y] = s.split('/')
-      data = `${y}-${m}-${d}`
-    } else if (/^\d{2}-\d{2}-\d{4}/.test(s)) {
-      const [d, m, y] = s.split('-')
-      data = `${y}-${m}-${d}`
-    } else if (!isNaN(Number(s)) && Number(s) > 10000) {
-      const dt = new Date(Math.round((Number(s) - 25569) * 86400 * 1000))
-      data = dt.toISOString().slice(0, 10)
-    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) { data = s.slice(0, 10) }
+    else if (/^\d{2}\/\d{2}\/\d{4}/.test(s)) { const [d, m, y] = s.split('/'); data = `${y}-${m}-${d}` }
+    else if (/^\d{2}-\d{2}-\d{4}/.test(s)) { const [d, m, y] = s.split('-'); data = `${y}-${m}-${d}` }
+    else if (!isNaN(Number(s)) && Number(s) > 10000) { const dt = new Date(Math.round((Number(s) - 25569) * 86400 * 1000)); data = dt.toISOString().slice(0, 10) }
   }
   if (!data) return null
 
-  // ── Produto e SKU (EN + PT) ───────────────────────────────────────────────
   const nomeProd  = String(row['Product Name'] || row['Nome do Produto'] || row['Nama Produk'] || '').trim()
   const skuVenda  = String(row['Seller SKU'] || row['Número de referência SKU'] || row['SKU Referensi'] || row['SKU'] || '').trim()
   const skuPrinc  = String(row['SKU Reference No.'] || row['Nº de referência do SKU principal'] || skuVenda).trim()
-
-  // ── Quantidade (EN + PT) ──────────────────────────────────────────────────
   const quantidade = parseInt(String(row['Quantity'] || row['Quantidade'] || row['Jumlah'] || '1')) || 1
 
-  // ── Preços (EN + PT) ──────────────────────────────────────────────────────
   const num = (v: any) => parseFloat(String(v || '0').replace(/[^0-9.,\-]/g, '').replace(',', '.')) || 0
   const precoAcordado = num(row['Agreed Price']   || row['Preço acordado']  || row['Harga Kesepakatan'])
   const precoOriginal = num(row['Original Price'] || row['Preço original']  || row['Harga Asli'])
   const precoUnitario = precoAcordado > 0 ? precoAcordado : precoOriginal
   const valorBruto    = precoUnitario * quantidade
 
-  // ── Taxas reais (EN + PT) ─────────────────────────────────────────────────
-  // Taxa Shopee = Cupom do Vendedor + Taxa de Comissão Bruta + Taxa de Serviço Bruta
   const cupomVendedor  = Math.abs(num(row['Cupom do vendedor'] || row['Seller Voucher'] || row['Voucher Seller'] || 0))
   const comissaoShopee = Math.abs(num(row['Shopee Commission'] || row['Taxa de comissão bruta'] || row['Komisi Shopee'] || 0))
   const taxaServico    = Math.abs(num(row['Shopee Fee']        || row['Taxa de serviço bruta']  || row['Biaya Shopee'] || 0))
   const taxaShopeeTotal = cupomVendedor + comissaoShopee + taxaServico
   const valorLiquido   = num(row['Final Amount Received'] || row['Total global'] || row['Total Diterima'] || 0)
 
-  // ── Loja (EN + PT) ────────────────────────────────────────────────────────
   const lojaRaw = String(row['Store Name'] || row['Loja'] || row['LOJA'] || '').trim().toUpperCase()
   const loja = LOJAS.find(l => lojaRaw.includes(l.split(' ')[0].toUpperCase())) || lojaRaw || LOJAS[0]
 
   return {
-    pedido:          numPedido,
-    status,
-    data,
-    loja,
-    sku:             skuVenda || skuPrinc,
-    
-    produto:         nomeProd,
-    quantidade,
-    _preco_unitario:  precoUnitario,
-    _preco_original:  precoOriginal,
-    valor_bruto:     valorBruto,
-    comissao_shopee: taxaShopeeTotal,    // Cupom + Comissão + Taxa Serviço
-    valor_liquido:   valorLiquido,       // Final Amount Received (real)
-    
-    
-    
-    
+    pedido: numPedido, status, data, loja,
+    sku: skuVenda || skuPrinc, produto: nomeProd, quantidade,
+    _preco_unitario: precoUnitario, _preco_original: precoOriginal,
+    valor_bruto: valorBruto, comissao_shopee: taxaShopeeTotal, valor_liquido: valorLiquido,
   }
 }
 
-// ─── MAIN ─────────────────────────────────────────────────────────────────────
 export default function FinanceiroPage() {
   const [rows,       setRows]       = useState<any[]>([])
   const [skuMap,     setSkuMap]     = useState<any[]>([])
@@ -170,21 +126,14 @@ export default function FinanceiroPage() {
   const [filterLoja, setFilterLoja] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
-  const [imposto,    setImposto]    = useState(() => {
-    if (typeof window === 'undefined') return DEFAULT_IMPOSTO
-    const saved = localStorage.getItem('erp_imposto')
-    return saved ? parseFloat(saved) : DEFAULT_IMPOSTO
-  })
-  const [impostoInput, setImpostoInput] = useState(() => {
-    if (typeof window === 'undefined') return (DEFAULT_IMPOSTO * 100).toFixed(1)
-    const saved = localStorage.getItem('erp_imposto')
-    return saved ? (parseFloat(saved) * 100).toFixed(1) : (DEFAULT_IMPOSTO * 100).toFixed(1)
-  })
   const [showCfg,    setShowCfg]    = useState(false)
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [periodo,    setPeriodo]    = useState('personalizado')
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // FIX: hook centralizado — mesmo valor do DRE e demais páginas
+  const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   const [form, setForm] = useState({
     data: '', loja: LOJAS[0], pedido: '', sku: '', produto: '',
@@ -206,24 +155,19 @@ export default function FinanceiroPage() {
     setLoading(false)
   }
 
-  // ── Calcula custo do produto cruzando sku_map + estoque ──────────────────
   function calcCustoProduto(skuVendido: string, quantidade: number): number {
     if (!skuVendido) return 0
     const componentes = skuMap.filter(m => m.sku_venda === skuVendido)
     if (!componentes.length) return 0
-
-    // Custo do produto = Σ (custo_unitario × qtd_componente × qtd_pedido)
     const custoProd = componentes.reduce((total, comp) => {
       const prod = estoque.find(e => e.sku_base === comp.sku_base)
       if (!prod) return total
       return total + (prod.custo || 0) * (comp.quantidade || 1) * quantidade
     }, 0)
-
-    // Custo embalagem = fixo por venda (pega do primeiro componente, não multiplica)
+    // custo_embalagem é cadastrado separado do custo unitário (ver aba Produtos Base)
     const primeiroComp = componentes[0]
     const prodPrincipal = estoque.find(e => e.sku_base === primeiroComp?.sku_base)
-
-    return custoProd
+    return custoProd + (prodPrincipal?.custo_embalagem || 0)
   }
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
@@ -231,70 +175,40 @@ export default function FinanceiroPage() {
   function aplicarPeriodo(p: string) {
     setPeriodo(p)
     const hoje = new Date()
-    const fmt = (d: Date) => d.toISOString().slice(0,10)
-    const ini = (d: Date) => { const x = new Date(d); return x }
-    if (p === 'hoje') {
-      setDateFrom(fmt(hoje)); setDateTo(fmt(hoje))
-    } else if (p === 'ontem') {
-      const d = new Date(hoje); d.setDate(d.getDate()-1)
-      setDateFrom(fmt(d)); setDateTo(fmt(d))
-    } else if (p === 'semana') {
-      const d = new Date(hoje); d.setDate(d.getDate()-6)
-      setDateFrom(fmt(d)); setDateTo(fmt(hoje))
-    } else if (p === 'mes') {
-      const d = new Date(hoje); d.setDate(d.getDate()-29)
-      setDateFrom(fmt(d)); setDateTo(fmt(hoje))
-    } else if (p === 'tudo') {
-      setDateFrom(''); setDateTo('')
-    }
+    const fmt = (d: Date) => d.toISOString().slice(0, 10)
+    if (p === 'hoje') { setDateFrom(fmt(hoje)); setDateTo(fmt(hoje)) }
+    else if (p === 'ontem') { const d = new Date(hoje); d.setDate(d.getDate() - 1); setDateFrom(fmt(d)); setDateTo(fmt(d)) }
+    else if (p === 'semana') { const d = new Date(hoje); d.setDate(d.getDate() - 6); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'mes') { const d = new Date(hoje); d.setDate(d.getDate() - 29); setDateFrom(fmt(d)); setDateTo(fmt(hoje)) }
+    else if (p === 'tudo') { setDateFrom(''); setDateTo('') }
   }
 
-  // Importar Excel da Shopee — CORREÇÃO 1: lê por nome de coluna
   async function handleExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     const buf = await file.arrayBuffer()
     const wb  = XLSX.read(buf, { type: 'array' })
     const ws  = wb.Sheets[wb.SheetNames[0]]
-
-    // sheet_to_json sem header:1 → cada linha é objeto { "Order ID": ..., "Agreed Price": ..., ... }
     const jsonRows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { raw: false, defval: '' })
 
-    // DEBUG — ver keys da primeira linha no console
     if (jsonRows.length > 0) {
       console.log('[DEBUG] Keys da linha 1:', Object.keys(jsonRows[0]))
-      console.log('[DEBUG] Status:', jsonRows[0]['Status do pedido'])
-      console.log('[DEBUG] ID pedido:', jsonRows[0]['ID do pedido'])
-      console.log('[DEBUG] Data:', jsonRows[0]['Data de criação do pedido'])
     }
 
-    const parsed = jsonRows
-      .map(row => parseShopeeRow(row))
-      .filter((r): r is NonNullable<typeof r> => r !== null)
-
+    const parsed = jsonRows.map(row => parseShopeeRow(row)).filter((r): r is NonNullable<typeof r> => r !== null)
     console.log('[DEBUG] Total linhas:', jsonRows.length, '| Válidas:', parsed.length)
 
     if (!parsed.length) { showToast('Nenhum pedido válido encontrado. Verifique o arquivo e os status.', 'err'); return }
 
     setSaving(true)
     const comUpsert = parsed.map(p => ({
-      pedido:          p.pedido,
-      data:            p.data,
-      loja:            p.loja,
-      sku:             p.sku,
-      produto:         p.produto,
-      quantidade:      p.quantidade,
-      valor_bruto:     p.valor_bruto,
-      desconto:        p.desconto || 0,
-      frete:           p.frete || 0,
-      comissao_shopee: p.comissao_shopee || 0,
-      valor_liquido:   p.valor_liquido || 0,
+      pedido: p.pedido, data: p.data, loja: p.loja, sku: p.sku,
+      produto: p.produto, quantidade: p.quantidade, valor_bruto: p.valor_bruto,
+      desconto: p.desconto || 0, frete: p.frete || 0,
+      comissao_shopee: p.comissao_shopee || 0, valor_liquido: p.valor_liquido || 0,
     }))
 
-    const { error } = await supabase.from('financeiro').upsert(
-      comUpsert,
-      { onConflict: 'pedido,sku' }
-    )
+    const { error } = await supabase.from('financeiro').upsert(comUpsert, { onConflict: 'pedido,sku' })
     setSaving(false)
     if (error) { showToast('Erro ao salvar: ' + error.message, 'err'); return }
     showToast(`✅ ${parsed.length} pedidos importados com sucesso!`)
@@ -302,27 +216,16 @@ export default function FinanceiroPage() {
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  // Adicionar manual
   async function addManual() {
     if (!form.data || !form.pedido || !form.sku || !form.valor_bruto) {
       showToast('Preencha data, pedido, SKU e valor', 'err'); return
     }
-    const recBruta = +form.valor_bruto
-    const calc = calcLinha(recBruta, 0, imposto)
     setSaving(true)
     const { error } = await supabase.from('financeiro').insert({
-      pedido:          form.pedido,
-      data:            form.data,
-      loja:            form.loja,
-      sku:             form.sku,
-      produto:         form.produto,
-      quantidade:      +form.quantidade,
-      valor_bruto:     recBruta,
-      desconto:        0,
-      frete:           0,
-      comissao_shopee: 0,
-      taxas_shopee:    0,
-      valor_liquido:   recBruta,
+      pedido: form.pedido, data: form.data, loja: form.loja, sku: form.sku,
+      produto: form.produto, quantidade: +form.quantidade,
+      valor_bruto: +form.valor_bruto, desconto: 0, frete: 0,
+      comissao_shopee: 0, taxas_shopee: 0, valor_liquido: +form.valor_bruto,
     })
     setSaving(false)
     if (error) { showToast('Erro: ' + error.message, 'err'); return }
@@ -348,20 +251,19 @@ export default function FinanceiroPage() {
     loadData()
   }
 
-  // Filtrar + calcular: usa taxas reais do banco quando disponíveis, recalcula como fallback
   const filtered = useMemo(() => rows.filter(r => {
     if (filterLoja !== 'Todas' && r.loja !== filterLoja) return false
     if (dateFrom && r.data < dateFrom) return false
     if (dateTo   && r.data > dateTo)   return false
     return true
   }).map(r => {
-    const recBruta = r.valor_bruto || r.valor_bruto || 0
+    const recBruta   = r.valor_bruto || 0
     const taxaShopee = (r.comissao_shopee && r.comissao_shopee > 0)
       ? r.comissao_shopee
       : recBruta * TAXA_SHOPEE
-    const skuVenda = r.sku || ''
-    const cProd    = calcCustoProduto(skuVenda, r.quantidade || 1)
-    const imp      = recBruta * imposto
+    const cProd      = calcCustoProduto(r.sku || '', r.quantidade || 1)
+    // FIX: imposto do hook, não hardcoded
+    const imp        = recBruta * imposto
     const custoTotal = taxaShopee + cProd + imp
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
@@ -369,7 +271,7 @@ export default function FinanceiroPage() {
   }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
-  const totLuc  = filtered.reduce((s, r) => s + r.lucroOp,  0)
+  const totLuc  = filtered.reduce((s, r) => s + r.lucroOp, 0)
   const totTaxa = filtered.reduce((s, r) => s + r.taxaShopee, 0)
   const totImp  = filtered.reduce((s, r) => s + r.imp, 0)
 
@@ -380,17 +282,17 @@ export default function FinanceiroPage() {
   )
 
   return (
-    <div style={{ padding: "20px 24px", width: "100%", boxSizing: "border-box" }}>
+    <div style={{ padding: '20px 24px', width: '100%', boxSizing: 'border-box' }}>
       {/* HEADER */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>💰 Financeiro — Pedidos Shopee</h2>
         <div style={{ flex: 1 }} />
         <button onClick={() => setShowCfg(!showCfg)} style={S.btnSm as any}>⚙️ Configurar</button>
         <button onClick={() => {
-          const cols = ['data','loja','pedido','sku','produto','quantidade','valor_bruto','comissao_shopee','taxas_shopee','valor_liquido']
+          const cols = ['data', 'loja', 'pedido', 'sku', 'produto', 'quantidade', 'valor_bruto', 'comissao_shopee', 'taxas_shopee', 'valor_liquido']
           const header = cols.join(';')
-          const rows = filtered.map((p: any) => cols.map((c: string) => `"${(p as any)[c] ?? ''}"`).join(';'))
-          const csv = [header, ...rows].join('\n')
+          const csvRows = filtered.map((p: any) => cols.map((c: string) => `"${(p as any)[c] ?? ''}"`).join(';'))
+          const csv = [header, ...csvRows].join('\n')
           const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a'); a.href = url; a.download = 'financeiro.csv'; a.click()
@@ -409,28 +311,17 @@ export default function FinanceiroPage() {
           <option value="Todas">Todas as lojas</option>
           {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        {/* Filtros rápidos de período */}
-        {(['hoje','ontem','semana','mes','tudo','personalizado'] as const).map(p => (
-          <button key={p} onClick={() => aplicarPeriodo(p)} style={{
-            background: periodo === p ? '#ff6600' : '#13131e',
-            color: periodo === p ? '#fff' : '#9090aa',
-            border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`,
-            borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11,
-          }}>
+        {(['hoje', 'ontem', 'semana', 'mes', 'tudo', 'personalizado'] as const).map(p => (
+          <button key={p} onClick={() => aplicarPeriodo(p)} style={{ background: periodo === p ? '#ff6600' : '#13131e', color: periodo === p ? '#fff' : '#9090aa', border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`, borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>
             {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
           </button>
         ))}
-        {/* Datas personalizadas */}
         {periodo === 'personalizado' && <>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
           <span style={{ color: '#555', fontSize: 12 }}>até</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
         </>}
-        {/* Botão excluir período */}
-        <button onClick={() => setConfirmDel(true)} style={{
-          background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430',
-          borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 11, marginLeft: 'auto'
-        }}>🗑️ Excluir Período</button>
+        <button onClick={() => setConfirmDel(true)} style={{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 11, marginLeft: 'auto' }}>🗑️ Excluir Período</button>
       </div>
 
       {/* PAINEL CONFIGURAÇÕES */}
@@ -444,24 +335,20 @@ export default function FinanceiroPage() {
                 <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
                   style={{ ...S.inp, width: 80 } as any} step="0.1" min="0" max="50" />
                 <span style={{ fontSize: 12, color: '#55556a' }}>%</span>
-                <button onClick={() => {
-                  const v = parseFloat(impostoInput) / 100
-                  setImposto(v)
-                  localStorage.setItem('erp_imposto', String(v))
-                  showToast('Imposto salvo: ' + impostoInput + '%')
-                }} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
+                {/* FIX: salvarImposto do hook garante persistência e sync entre páginas */}
+                <button onClick={() => { salvarImposto(); showToast('Imposto salvo: ' + impostoInput + '%') }}
+                  style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                   ✓ Salvar
                 </button>
               </div>
             </div>
             <div>
               <label style={S.label}>Custo Embalagem Adicional (R$/pedido)</label>
-              <input type="number" value={0} disabled
-                style={{ ...S.inp, width: 120 } as any} step="0.01" min="0" />
+              <input type="number" value={0} disabled style={{ ...S.inp, width: 120 } as any} step="0.01" min="0" />
             </div>
             <div style={{ fontSize: 11, color: '#555', padding: '8px 12px', background: '#13131e', borderRadius: 6 }}>
               <div>Taxa Shopee: <strong style={{ color: '#ff9933' }}>20%</strong></div>
-              <div>Taxa Fixa: <strong style={{ color: '#ff9933' }}>R$ 4,00/pedido</strong></div>
+              <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Taxa fixa inclusa na coluna Taxa Shop do Excel</div>
             </div>
           </div>
         </div>
@@ -476,7 +363,7 @@ export default function FinanceiroPage() {
               ['Data', 'date', 'data'], ['Nº Pedido', 'text', 'pedido'],
               ['SKU', 'text', 'sku'], ['Produto', 'text', 'produto'],
               ['Qtd', 'number', 'quantidade'], ['Valor Unit R$', 'number', 'preco_unitario'],
-              ['Valor Bruto R$', 'number', 'valor_bruto'], ['Comissão Shopee R$', 'number', 'comissao_shopee'],
+              ['Valor Bruto R$', 'number', 'valor_bruto'],
             ] as [string, string, string][]).map(([lbl, type, field]) => (
               <div key={field}>
                 <label style={S.label}>{lbl}</label>
@@ -497,11 +384,6 @@ export default function FinanceiroPage() {
           </div>
         </div>
       )}
-
-      {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-
-      </div>
 
       {/* MODAL CONFIRMAR EXCLUSÃO */}
       {confirmDel && (
@@ -535,7 +417,7 @@ export default function FinanceiroPage() {
             D(p.data),
             <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
             <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{p.pedido}</span>,
-            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku || p.sku}</span>,
+            <span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11 }}>{p.sku}</span>,
             <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{p.produto}</span>,
             N(p.quantidade),
             R(p.quantidade > 0 ? p.recBruta / p.quantidade : 0),
@@ -553,6 +435,7 @@ export default function FinanceiroPage() {
       </div>
 
       {toast && <Toast msg={toast.msg} type={toast.type} onClose={() => setToast(null)} />}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
