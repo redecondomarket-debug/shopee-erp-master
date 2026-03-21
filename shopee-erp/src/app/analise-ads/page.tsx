@@ -125,7 +125,7 @@ export default function AnaliseAdsPage() {
     }, 0)
     // FIX: inclui custo produto e embalagem (estava faltando → lucroOp inflado)
     const cProd = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
-    const cEmb = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+    const cEmb = 0 // embalagem já inclusa em calcCustoProd via estoque
     // FIX: imposto do hook
     const imp   = rec * imposto
     const lucOp = rec - taxas - cProd - cEmb - imp
