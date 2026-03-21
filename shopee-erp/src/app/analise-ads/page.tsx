@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTaxRate } from '@/hooks/useTaxRate'
 
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 const LOJA_COLORS: Record<string, string> = {
@@ -9,8 +10,6 @@ const LOJA_COLORS: Record<string, string> = {
   'MUNDO DOS ACHADOS': '#a855f7',
 }
 const TAXA_SHOPEE = 0.20
-const TAXA_FIXA   = 4.05
-const DEFAULT_IMPOSTO = 0.06
 
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
@@ -35,13 +34,12 @@ function ROASBadge({ v }: { v: number }) {
   const color = v >= 2 ? '#22c55e' : v >= 1 ? '#f59e0b' : '#ef4444'
   return <Badge color={color}>{(+v || 0).toFixed(2)}x</Badge>
 }
-function KPI({ label, value, sub, color = '#ff9933', icon }: any) {
+function KPI({ label, value, color = '#ff9933', icon }: any) {
   return (
     <div style={{ ...S.card, flex: 1, minWidth: 150 }}>
       <div style={{ fontSize: 22, marginBottom: 4 }}>{icon}</div>
       <div style={{ fontSize: 22, fontWeight: 800, color, fontVariantNumeric: 'tabular-nums', letterSpacing: -1 }}>{value}</div>
       <div style={{ fontSize: 11, color: '#888', marginTop: 2, fontWeight: 600 }}>{label}</div>
-      {sub && <div style={{ fontSize: 10, color: '#555', marginTop: 2 }}>{sub}</div>}
     </div>
   )
 }
@@ -62,61 +60,88 @@ function MiniBar({ data, height = 100, colorFn }: { data: { l: string; v: number
 export default function AnaliseAdsPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
+  const [skuMapData, setSkuMapData] = useState<any[]>([])
+  const [estoque,    setEstoque]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
-  const [imposto,    setImposto]    = useState(DEFAULT_IMPOSTO)
+
+  // FIX: hook centralizado — lê e salva no localStorage, mesmo valor de todas as páginas
+  const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
-    const [finRes, adsRes] = await Promise.all([
+    const [finRes, adsRes, mapRes, estRes] = await Promise.all([
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('ads').select('*').order('data', { ascending: false }),
+      supabase.from('sku_map').select('*'),
+      supabase.from('estoque').select('*'),
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
+    setSkuMapData(mapRes.data || [])
+    setEstoque(estRes.data || [])
     setLoading(false)
+  }
+
+  // FIX: calcula custo do produto cruzando sku_map + estoque (estava faltando)
+  function calcCustoProd(skuVendido: string, quantidade: number): number {
+    if (!skuVendido) return 0
+    const comps = skuMapData.filter(m => m.sku_venda === skuVendido)
+    if (!comps.length) return 0
+    return comps.reduce((t, c) => {
+      const prod = estoque.find(e => e.sku_base === c.sku_base)
+      return t + (prod?.custo || 0) * (c.quantidade || 1) * quantidade
+    }, 0)
   }
 
   const finF = useMemo(() => financeiro.filter(f => {
     if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return false
     if (dateFrom && f.data < dateFrom) return false
-    if (dateTo   && f.data > dateTo)   return false
+    if (dateTo && f.data > dateTo) return false
     return true
   }), [financeiro, lojaFiltro, dateFrom, dateTo])
 
   const adsF = useMemo(() => ads.filter(a => {
     if (lojaFiltro !== 'Todas' && a.loja !== lojaFiltro) return false
     if (dateFrom && a.data < dateFrom) return false
-    if (dateTo   && a.data > dateTo)   return false
+    if (dateTo && a.data > dateTo) return false
     return true
   }), [ads, lojaFiltro, dateFrom, dateTo])
 
-  // Por loja (idêntico ao TabAnaliseAds do App.js)
   const lojasList = lojaFiltro === 'Todas' ? LOJAS : [lojaFiltro]
+
   const rows = useMemo(() => lojasList.map(loja => {
     const lp    = finF.filter(f => f.loja === loja)
     const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-    const taxas = rec * TAXA_SHOPEE + lp.length * TAXA_FIXA
+    // taxa real do banco quando disponível
+    const taxas = lp.reduce((s, f) => {
+      return s + ((f.comissao_shopee && f.comissao_shopee > 0)
+        ? f.comissao_shopee
+        : (f.valor_bruto || 0) * TAXA_SHOPEE)
+    }, 0)
+    // FIX: inclui custo produto e embalagem (estava faltando → lucroOp inflado)
+    const cProd = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
+    const cEmb = lp.reduce((s, f) => s + (f.custo_embalagem || 0), 0)
+    // FIX: imposto do hook
     const imp   = rec * imposto
-    const lucOp = rec - taxas - imp
+    const lucOp = rec - taxas - cProd - cEmb - imp
     const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
     const ll    = lucOp - gads
     return { loja, rec, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, margem: rec > 0 ? ll / rec : 0 }
-  }), [finF, adsF, imposto, lojaFiltro])
+  }), [finF, adsF, imposto, skuMapData, estoque, lojaFiltro])
 
-  const totRec = rows.reduce((s, r) => s + r.rec, 0)
-  const totAds = rows.reduce((s, r) => s + r.gads, 0)
-  const totLL  = rows.reduce((s, r) => s + r.ll, 0)
+  const totRec   = rows.reduce((s, r) => s + r.rec, 0)
+  const totAds   = rows.reduce((s, r) => s + r.gads, 0)
+  const totLL    = rows.reduce((s, r) => s + r.ll, 0)
   const totLucOp = rows.reduce((s, r) => s + r.lucOp, 0)
 
-  // Por dia
   const byDay: Record<string, number> = {}
   adsF.forEach(a => { byDay[a.data] = (byDay[a.data] || 0) + (a.gasto || a.investimento || 0) })
-  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8,10) + '/' + d.slice(5,7), v }))
+  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([d, v]) => ({ l: d.slice(8, 10) + '/' + d.slice(5, 7), v }))
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -128,11 +153,13 @@ export default function AnaliseAdsPage() {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <h2 style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 800, color: '#e8e8f8', letterSpacing: -0.3 }}>📈 Análise de Anúncios — ROAS e Eficiência por Loja</h2>
+        {/* FIX: input de imposto salva no localStorage via hook */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
-          <input type="number" value={(imposto * 100).toFixed(1)} onChange={e => setImposto(+e.target.value / 100)}
+          <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
             style={{ ...S.inp, width: 55, textAlign: 'center' as any }} step="0.1" />
           <span style={{ fontSize: 11, color: '#888' }}>%</span>
+          <button onClick={() => salvarImposto()} style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontWeight: 700, fontSize: 11 }}>✓</button>
         </div>
       </div>
 
@@ -149,12 +176,12 @@ export default function AnaliseAdsPage() {
         )}
       </div>
 
-      {/* 4 KPIs */}
+      {/* KPIs */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI icon="💰" label="Receita Total"  value={R(totRec)}  color="#ff9933" />
-        <KPI icon="📣" label="Total Ads"      value={R(totAds)}  color="#e67e22" />
-        <KPI icon="⚡" label="ROAS Geral"     value={`${(totAds > 0 ? totRec / totAds : 0).toFixed(2)}x`} color={totAds > 0 && totRec / totAds >= 2 ? '#22c55e' : '#f59e0b'} />
-        <KPI icon="✅" label="Lucro Líquido"  value={R(totLL)}   color={totLL >= 0 ? '#22c55e' : '#ef4444'} />
+        <KPI icon="💰" label="Receita Total" value={R(totRec)}  color="#ff9933" />
+        <KPI icon="📣" label="Total Ads"     value={R(totAds)}  color="#e67e22" />
+        <KPI icon="⚡" label="ROAS Geral"    value={`${(totAds > 0 ? totRec / totAds : 0).toFixed(2)}x`} color={totAds > 0 && totRec / totAds >= 2 ? '#22c55e' : '#f59e0b'} />
+        <KPI icon="✅" label="Lucro Líquido" value={R(totLL)}   color={totLL >= 0 ? '#22c55e' : '#ef4444'} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
@@ -164,11 +191,7 @@ export default function AnaliseAdsPage() {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr>
-                  {['Loja', 'Receita', 'Lucro Op', 'Gasto Ads', 'ROAS', 'Lucro Líq', 'Margem Líq'].map(h => (
-                    <th key={h} style={S.th as any}>{h}</th>
-                  ))}
-                </tr>
+                <tr>{['Loja', 'Receita', 'Lucro Op', 'Gasto Ads', 'ROAS', 'Lucro Líq', 'Margem Líq'].map(h => <th key={h} style={S.th as any}>{h}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.map(r => (
@@ -196,10 +219,10 @@ export default function AnaliseAdsPage() {
           </div>
         </div>
 
-        {/* VISUALIZAÇÃO ROAS */}
+        {/* ROAS POR LOJA */}
         <div style={S.card}>
           <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>⚡ ROAS por Loja</div>
-          <MiniBar data={rows.map(r => ({ l: r.loja.split(' ')[0], v: r.roas }))} height={130} colorFn={i => [LOJA_COLORS[rows[i]?.loja] || '#ff6600'][0]} />
+          <MiniBar data={rows.map(r => ({ l: r.loja.split(' ')[0], v: r.roas }))} height={130} colorFn={i => LOJA_COLORS[rows[i]?.loja] || '#ff6600'} />
           <div style={{ marginTop: 12 }}>
             {rows.map(r => (
               <div key={r.loja} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, padding: '7px 12px', background: '#13131e', borderRadius: 6 }}>
@@ -218,13 +241,13 @@ export default function AnaliseAdsPage() {
         </div>
       </div>
 
-      {/* Ads por Dia */}
       {dayChart.length > 0 && (
         <div style={{ ...S.card, marginTop: 16 }}>
           <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📅 Gasto Ads por Dia</div>
           <MiniBar data={dayChart} height={100} colorFn={() => '#e67e22'} />
         </div>
       )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
