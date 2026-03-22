@@ -367,10 +367,22 @@ function GraficoFatVsAds({ data }: { data: { l: string; fat: number; ads: number
       {data.map((d, i) => {
         const bFat = Math.max((d.fat / maxV) * BAR_H, 2)
         const bAds = Math.max((d.ads / maxV) * BAR_H, 2)
+        const byFat = BAR_BOT - bFat
+        const byAds = BAR_BOT - bAds
         return (
           <g key={i}>
-            <rect x={xFat(i)} y={BAR_BOT-bFat} width={bW} height={bFat} rx={3} fill="#1a4a8a" fillOpacity={0.9}/>
-            <rect x={xAds(i)} y={BAR_BOT-bAds} width={bW} height={bAds} rx={3} fill="#7c3aed" fillOpacity={0.85}/>
+            <rect x={xFat(i)} y={byFat} width={bW} height={bFat} rx={3} fill="#1a4a8a" fillOpacity={0.9}/>
+            {d.fat > 0 && (
+              <text x={xFat(i) + bW/2} y={byFat - 4} textAnchor="middle" fontSize={8.5} fill="#5599ff" fontWeight="700">
+                {fmtV(d.fat)}
+              </text>
+            )}
+            <rect x={xAds(i)} y={byAds} width={bW} height={bAds} rx={3} fill="#7c3aed" fillOpacity={0.85}/>
+            {d.ads > 0 && (
+              <text x={xAds(i) + bW/2} y={byAds - 4} textAnchor="middle" fontSize={8.5} fill="#a78bfa" fontWeight="700">
+                {fmtV(d.ads)}
+              </text>
+            )}
             <text x={xMid(i)} y={H-PB+14} textAnchor="middle" fontSize={9.5} fill="#9090aa" fontWeight="600">{d.l}</text>
           </g>
         )
@@ -862,14 +874,14 @@ export default function DashboardPage() {
                   <div>
                     {mediaPorDia.map((d, i) => {
                       const pct    = d.media / maxMedia
-                      const cor    = pct > 0.8 ? '#22c55e' : pct > 0.5 ? '#f59e0b' : pct > 0.2 ? '#ff6600' : '#2a2a3a'
+                      const cor    = pct > 0.8 ? '#22c55e' : pct > 0.5 ? '#f59e0b' : pct > 0.2 ? '#ef4444' : '#2a2a3a'
                       const bgOpac = Math.max(pct * 0.8, 0.08)
                       return (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
                           <div style={{ width: 30, fontSize: 12, fontWeight: 600, color: '#9090aa', flexShrink: 0 }}>{d.nome}</div>
                           <div style={{ flex: 1, height: 28, background: '#1a1a26', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
                             <div style={{ height: '100%', width: `${pct * 100}%`, background: cor, opacity: bgOpac + 0.2, borderRadius: 6, transition: 'width .4s' }} />
-                            <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: cor }}>
+                            <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: '#e2e2f0' }}>
                               {R(d.media)}/dia
                             </div>
                           </div>
