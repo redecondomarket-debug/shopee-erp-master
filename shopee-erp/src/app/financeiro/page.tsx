@@ -130,6 +130,7 @@ export default function FinanceiroPage() {
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [periodo,    setPeriodo]    = useState('personalizado')
+  const [buscaPedido, setBuscaPedido] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // FIX: hook centralizado — mesmo valor do DRE e demais páginas
@@ -255,6 +256,9 @@ export default function FinanceiroPage() {
     if (filterLoja !== 'Todas' && r.loja !== filterLoja) return false
     if (dateFrom && r.data < dateFrom) return false
     if (dateTo   && r.data > dateTo)   return false
+    // Busca por ID do pedido ou SKU
+    if (buscaPedido && !String(r.pedido || '').toLowerCase().includes(buscaPedido.toLowerCase())
+                    && !String(r.sku    || '').toLowerCase().includes(buscaPedido.toLowerCase())) return false
     return true
   }).map(r => {
     const recBruta   = r.valor_bruto || 0
@@ -268,7 +272,7 @@ export default function FinanceiroPage() {
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
     return { ...r, recBruta, taxaShopee, custoProd: cProd, imp, custoTotal, lucroOp, margem }
-  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto])
+  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto, buscaPedido])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
   const totLuc  = filtered.reduce((s, r) => s + r.lucroOp, 0)
@@ -321,6 +325,20 @@ export default function FinanceiroPage() {
           <span style={{ color: '#555', fontSize: 12 }}>até</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
         </>}
+        {/* Busca por ID do pedido ou SKU */}
+        <div style={{ position: 'relative' as any, display: 'flex', alignItems: 'center' }}>
+          <span style={{ position: 'absolute' as any, left: 10, fontSize: 13, color: '#55556a' }}>🔍</span>
+          <input
+            value={buscaPedido}
+            onChange={e => setBuscaPedido(e.target.value)}
+            placeholder="Buscar por ID do pedido ou SKU..."
+            style={{ ...S.inp, width: 260, paddingLeft: 30 } as any}
+          />
+          {buscaPedido && (
+            <button onClick={() => setBuscaPedido('')}
+              style={{ position: 'absolute' as any, right: 8, background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>✕</button>
+          )}
+        </div>
         <button onClick={() => setConfirmDel(true)} style={{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 7, padding: '7px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 11, marginLeft: 'auto' }}>🗑️ Excluir Período</button>
       </div>
 
