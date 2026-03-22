@@ -271,6 +271,133 @@ function GraficoPizza({ fatias }: { fatias: { label: string; v: number; color: s
   )
 }
 
+
+// ── Gráfico Ads por Mês (mesmo padrão do faturamento) ────────────────────────
+function GraficoAdsMes({ data }: { data: { l: string; v: number; var: number | null }[] }) {
+  if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados de Ads</div>
+  const W = 760, H = 280, PL = 62, PR = 20, PB = 36
+  const BAR_TOP = 110, BAR_BOT = H - PB, BAR_H = BAR_BOT - BAR_TOP
+  const LINE_TOP = 14, LINE_BOT = 96, LINE_H = LINE_BOT - LINE_TOP
+  const iW = W - PL - PR, n = data.length
+  const bW = Math.max(24, iW / n - 10)
+  const xc = (i: number) => PL + (i + 0.5) * (iW / n)
+  const max = Math.max(...data.map(d => d.v), 1)
+  const vars  = data.map(d => d.var).filter(v => v !== null) as number[]
+  const vPad  = vars.length ? Math.max((Math.max(...vars) - Math.min(...vars)) * 0.15, 10) : 15
+  const vMin  = vars.length ? Math.min(...vars) - vPad : -20
+  const vMax  = vars.length ? Math.max(...vars) + vPad : 20
+  const yLn   = (v: number) => LINE_TOP + LINE_H * (1 - (v - vMin) / Math.max(vMax - vMin, 1))
+  const pts   = data.map((d, i) => d.var !== null ? `${xc(i)},${yLn(d.var!)}` : null).filter(Boolean).join(' ')
+  const fmtV  = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
+  const bTick = [0, 0.5, 1].map(p => ({ v: max * p, y: BAR_BOT - BAR_H * p }))
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+      <line x1={PL} x2={W-PR} y1={96} y2={96} stroke="#2a2a3a" strokeWidth={1} strokeDasharray="5,4"/>
+      {bTick.map((t, i) => (
+        <g key={i}>
+          <line x1={PL} x2={W-PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,5"/>
+          <text x={PL-6} y={t.y+4} textAnchor="end" fontSize={9} fill="#44445a">{fmtV(t.v)}</text>
+        </g>
+      ))}
+      {data.map((d, i) => {
+        const bh = Math.max((d.v / max) * BAR_H, 2)
+        const bx = xc(i) - bW / 2
+        const by = BAR_BOT - bh
+        return (
+          <g key={i}>
+            <rect x={bx} y={by} width={bW} height={bh} rx={4} fill="#7c3aed" fillOpacity={0.85}/>
+            <text x={xc(i)} y={by-5} textAnchor="middle" fontSize={9} fill="#a78bfa" fontWeight="700">{fmtV(d.v)}</text>
+            <text x={xc(i)} y={H-PB+14} textAnchor="middle" fontSize={10.5} fill="#9090aa" fontWeight="600">{d.l}</text>
+          </g>
+        )
+      })}
+      {pts && <polyline points={pts} fill="none" stroke="#f59e0b" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>}
+      {data.map((d, i) => {
+        if (d.var === null) return null
+        const cy  = yLn(d.var)
+        const cor = d.var >= 0 ? '#f59e0b' : '#22c55e'
+        const lblY = cy - LINE_TOP > 16 ? cy - 8 : cy + 17
+        return (
+          <g key={`v${i}`}>
+            <circle cx={xc(i)} cy={cy} r={5} fill={cor} stroke="#16161f" strokeWidth={2}/>
+            <text x={xc(i)} y={lblY} textAnchor="middle" fontSize={10} fill={cor} fontWeight="800">
+              {d.var >= 0 ? '+' : ''}{d.var.toFixed(1)}%
+            </text>
+          </g>
+        )
+      })}
+      <rect x={PL} y={96+12} width={11} height={10} rx={2} fill="#7c3aed" fillOpacity={0.85}/>
+      <text x={PL+15} y={96+21} fontSize={9} fill="#a78bfa">Gasto Ads mensal</text>
+      <circle cx={PL+145} cy={96+17} r={4} fill="#f59e0b"/>
+      <text x={PL+153} y={96+21} fontSize={9} fill="#f59e0b">% variação vs mês anterior</text>
+    </svg>
+  )
+}
+
+// ── Gráfico Faturamento vs Ads (barras duplas + linha ROAS) ───────────────────
+function GraficoFatVsAds({ data }: { data: { l: string; fat: number; ads: number; roas: number }[] }) {
+  if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados</div>
+  const W = 760, H = 280, PL = 62, PR = 20, PB = 36
+  const BAR_TOP = 110, BAR_BOT = H - PB, BAR_H = BAR_BOT - BAR_TOP
+  const LINE_TOP = 14, LINE_BOT = 96, LINE_H = LINE_BOT - LINE_TOP
+  const iW   = W - PL - PR, n = data.length
+  const slotW = iW / n
+  const bW    = Math.max(10, slotW / 2 - 4)
+  const xFat  = (i: number) => PL + i * slotW + slotW * 0.25
+  const xAds  = (i: number) => PL + i * slotW + slotW * 0.55
+  const xMid  = (i: number) => PL + (i + 0.5) * slotW
+  const maxV  = Math.max(...data.map(d => d.fat), 1)
+  const roasV = data.map(d => d.roas).filter(v => v > 0)
+  const rMin  = roasV.length ? Math.max(0, Math.min(...roasV) - 0.5) : 0
+  const rMax  = roasV.length ? Math.max(...roasV) + 0.5 : 5
+  const yBar  = (v: number) => BAR_BOT - (v / maxV) * BAR_H
+  const yRoas = (v: number) => LINE_TOP + LINE_H * (1 - (v - rMin) / Math.max(rMax - rMin, 1))
+  const roasPts = data.map((d, i) => d.roas > 0 ? `${xMid(i)},${yRoas(d.roas)}` : null).filter(Boolean).join(' ')
+  const fmtV  = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
+  const bTick = [0, 0.5, 1].map(p => ({ v: maxV * p, y: BAR_BOT - BAR_H * p }))
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+      <line x1={PL} x2={W-PR} y1={96} y2={96} stroke="#2a2a3a" strokeWidth={1} strokeDasharray="5,4"/>
+      {bTick.map((t, i) => (
+        <g key={i}>
+          <line x1={PL} x2={W-PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,5"/>
+          <text x={PL-6} y={t.y+4} textAnchor="end" fontSize={9} fill="#44445a">{fmtV(t.v)}</text>
+        </g>
+      ))}
+      {data.map((d, i) => {
+        const bFat = Math.max((d.fat / maxV) * BAR_H, 2)
+        const bAds = Math.max((d.ads / maxV) * BAR_H, 2)
+        return (
+          <g key={i}>
+            <rect x={xFat(i)} y={BAR_BOT-bFat} width={bW} height={bFat} rx={3} fill="#1a4a8a" fillOpacity={0.9}/>
+            <rect x={xAds(i)} y={BAR_BOT-bAds} width={bW} height={bAds} rx={3} fill="#7c3aed" fillOpacity={0.85}/>
+            <text x={xMid(i)} y={H-PB+14} textAnchor="middle" fontSize={9.5} fill="#9090aa" fontWeight="600">{d.l}</text>
+          </g>
+        )
+      })}
+      {roasPts && <polyline points={roasPts} fill="none" stroke="#22c55e" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round"/>}
+      {data.map((d, i) => {
+        if (!d.roas) return null
+        const cy  = yRoas(d.roas)
+        const cor = d.roas >= 2 ? '#22c55e' : d.roas >= 1 ? '#f59e0b' : '#ef4444'
+        const lblY = cy - LINE_TOP > 16 ? cy - 8 : cy + 17
+        return (
+          <g key={`r${i}`}>
+            <circle cx={xMid(i)} cy={cy} r={5} fill={cor} stroke="#16161f" strokeWidth={2}/>
+            <text x={xMid(i)} y={lblY} textAnchor="middle" fontSize={9.5} fill={cor} fontWeight="800">{d.roas.toFixed(1)}x</text>
+          </g>
+        )
+      })}
+      <rect x={PL} y={96+12} width={11} height={10} rx={2} fill="#1a4a8a" fillOpacity={0.9}/>
+      <text x={PL+15} y={96+21} fontSize={9} fill="#5599ff">Faturamento</text>
+      <rect x={PL+100} y={96+12} width={11} height={10} rx={2} fill="#7c3aed" fillOpacity={0.85}/>
+      <text x={PL+115} y={96+21} fontSize={9} fill="#a78bfa">Gasto Ads</text>
+      <circle cx={PL+200} cy={96+17} r={4} fill="#22c55e"/>
+      <text x={PL+208} y={96+21} fontSize={9} fill="#22c55e">ROAS mensal</text>
+    </svg>
+  )
+}
+
 export default function DashboardPage() {
   const [financeiro, setFinanceiro] = useState<any[]>([])
   const [ads,        setAds]        = useState<any[]>([])
@@ -440,6 +567,67 @@ export default function DashboardPage() {
     const rec = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
     return { loja, ticket: ped > 0 ? rec / ped : 0, peds: ped }
   }).filter(l => l.peds > 0)
+
+
+  // ── Gráfico Ads por mês (histórico completo) ─────────────────────────────
+  const byAds: Record<string, number> = {}
+  ads.forEach(a => {
+    if (!a.data) return
+    const key = a.data.slice(0, 7)
+    byAds[key] = (byAds[key] || 0) + (a.investimento || 0)
+  })
+  // Mesmas chaves que mesChart para alinhar meses
+  const adsChart = Object.entries(byMes).sort(([a], [b]) => a.localeCompare(b)).map(([k], i, arr) => {
+    const v    = byAds[k] || 0
+    const prev = i > 0 ? (byAds[arr[i-1][0]] || 0) : null
+    const varPct = prev !== null && prev > 0 ? ((v - prev) / prev) * 100 : null
+    const [ano, mes] = k.split('-')
+    return { l: `${MESES[+mes-1]}/${ano.slice(2)}`, v, var: varPct }
+  })
+
+  // ── Faturamento vs Ads por mês (barras duplas) ────────────────────────────
+  const fatVsAds = Object.entries(byMes).sort(([a], [b]) => a.localeCompare(b)).map(([k, fat]) => {
+    const adsMes = byAds[k] || 0
+    const roas   = adsMes > 0 ? fat / adsMes : 0
+    const [ano, mes] = k.split('-')
+    return { l: `${MESES[+mes-1]}/${ano.slice(2)}`, fat, ads: adsMes, roas }
+  })
+
+  // ── Heatmap dias da semana ────────────────────────────────────────────────
+  const DIAS_SEMANA = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
+  const heatmap: Record<string, number> = {}
+  finF.forEach(f => {
+    if (!f.data) return
+    const d   = new Date(f.data + 'T12:00:00')
+    const dia = d.getDay() // 0=Dom..6=Sáb
+    const semKey = f.data.slice(0, 7) + '-S' + Math.ceil(d.getDate() / 7)
+    const key = `${dia}-${semKey}`
+    heatmap[key] = (heatmap[key] || 0) + (f.valor_bruto || 0)
+  })
+  // Agrupar por dia da semana: média de faturamento
+  const mediaPorDia = DIAS_SEMANA.map((nome, idx) => {
+    const vals = finF
+      .filter(f => f.data && new Date(f.data + 'T12:00:00').getDay() === idx)
+      .reduce((acc: Record<string, number>, f) => {
+        const d = f.data.slice(0, 10)
+        acc[d] = (acc[d] || 0) + (f.valor_bruto || 0)
+        return acc
+      }, {})
+    const dias = Object.values(vals)
+    const media = dias.length ? dias.reduce((s, v) => s + v, 0) / dias.length : 0
+    return { nome, media, dias: dias.length }
+  })
+
+  // ── Velocidade de venda por SKU (unidades/dia) ────────────────────────────
+  const diasPeriodo = (() => {
+    const datas = finF.map(f => f.data).filter(Boolean).sort()
+    if (datas.length < 2) return 1
+    return Math.max(1, (new Date(datas[datas.length-1]).getTime() - new Date(datas[0]).getTime()) / 86400000 + 1)
+  })()
+  const velocidade = Object.values(skuAgg)
+    .map((s: any) => ({ ...s, velDia: s.qtd / diasPeriodo, diasCobertura: 0 }))
+    .sort((a: any, b: any) => b.velDia - a.velDia)
+    .slice(0, 10)
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -638,6 +826,101 @@ export default function DashboardPage() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+
+      {/* GRÁFICO ADS POR MÊS */}
+      <div style={{ ...S.card, marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>📣 Gasto em Ads por Mês</div>
+          <div style={{ fontSize: 10, color: '#44445a' }}>Histórico completo · linha mostra % variação vs mês anterior</div>
+        </div>
+        <GraficoAdsMes data={adsChart} />
+      </div>
+
+      {/* FATURAMENTO VS ADS POR MÊS */}
+      <div style={{ ...S.card, marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>⚖️ Faturamento vs Gasto Ads por Mês</div>
+          <div style={{ fontSize: 10, color: '#44445a' }}>Azul = Faturamento · Roxo = Ads · Linha = ROAS (≥2x ideal)</div>
+        </div>
+        <GraficoFatVsAds data={fatVsAds} />
+      </div>
+
+      {/* HEATMAP + VELOCIDADE DE VENDA */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+
+        {/* Heatmap dias da semana */}
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>🗓️ Faturamento Médio por Dia da Semana</div>
+          {mediaPorDia.every(d => d.media === 0)
+            ? <div style={{ color: '#555', textAlign: 'center', padding: 32, fontSize: 12 }}>Sem dados no período</div>
+            : (() => {
+                const maxMedia = Math.max(...mediaPorDia.map(d => d.media), 1)
+                return (
+                  <div>
+                    {mediaPorDia.map((d, i) => {
+                      const pct    = d.media / maxMedia
+                      const cor    = pct > 0.8 ? '#22c55e' : pct > 0.5 ? '#f59e0b' : pct > 0.2 ? '#ff6600' : '#2a2a3a'
+                      const bgOpac = Math.max(pct * 0.8, 0.08)
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                          <div style={{ width: 30, fontSize: 12, fontWeight: 600, color: '#9090aa', flexShrink: 0 }}>{d.nome}</div>
+                          <div style={{ flex: 1, height: 28, background: '#1a1a26', borderRadius: 6, overflow: 'hidden', position: 'relative' }}>
+                            <div style={{ height: '100%', width: `${pct * 100}%`, background: cor, opacity: bgOpac + 0.2, borderRadius: 6, transition: 'width .4s' }} />
+                            <div style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontFamily: 'monospace', fontWeight: 700, color: cor }}>
+                              {R(d.media)}/dia
+                            </div>
+                          </div>
+                          <div style={{ width: 28, fontSize: 10, color: '#44445a', flexShrink: 0, textAlign: 'right' as any }}>
+                            {d.dias}d
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <div style={{ fontSize: 10, color: '#33334a', marginTop: 8 }}>
+                      🟢 Alto · 🟡 Médio · 🟠 Baixo · ⬛ Sem venda · coluna direita = dias com dados
+                    </div>
+                  </div>
+                )
+              })()
+          }
+        </div>
+
+        {/* Velocidade de venda por SKU */}
+        <div style={S.card}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: '#c0c0d8' }}>⚡ Velocidade de Venda por SKU</div>
+          <div style={{ fontSize: 10, color: '#44445a', marginBottom: 12 }}>Unidades/dia · período de {diasPeriodo.toFixed(0)} dias</div>
+          {velocidade.length === 0
+            ? <div style={{ color: '#555', textAlign: 'center', padding: 32, fontSize: 12 }}>Sem dados no período</div>
+            : <div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gap: '6px 12px', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ fontSize: 10, color: '#44445a', fontWeight: 700, textTransform: 'uppercase' as any, letterSpacing: 0.8 }}>SKU</div>
+                  <div style={{ fontSize: 10, color: '#44445a', fontWeight: 700, textTransform: 'uppercase' as any, letterSpacing: 0.8 }}>Ritmo</div>
+                  <div style={{ fontSize: 10, color: '#44445a', fontWeight: 700, textTransform: 'uppercase' as any, letterSpacing: 0.8 }}>Un/dia</div>
+                  <div style={{ fontSize: 10, color: '#44445a', fontWeight: 700, textTransform: 'uppercase' as any, letterSpacing: 0.8 }}>30d</div>
+                </div>
+                {velocidade.map((s: any, i: number) => {
+                  const maxVel = velocidade[0]?.velDia || 1
+                  const pct    = s.velDia / maxVel
+                  const cor    = pct > 0.6 ? '#22c55e' : pct > 0.3 ? '#f59e0b' : '#0ea5e9'
+                  return (
+                    <div key={i} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', gap: '4px 12px', alignItems: 'center', marginBottom: 7 }}>
+                      <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#ff6600', fontWeight: 700 }}>{s.sku}</div>
+                      <div style={{ height: 8, background: '#1a1a26', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${pct * 100}%`, background: cor, borderRadius: 4, transition: 'width .4s' }} />
+                      </div>
+                      <div style={{ fontFamily: 'monospace', fontSize: 11, color: cor, fontWeight: 700, textAlign: 'right' as any }}>{s.velDia.toFixed(2)}</div>
+                      <div style={{ fontFamily: 'monospace', fontSize: 11, color: '#55556a', textAlign: 'right' as any }}>{Math.ceil(s.velDia * 30)}</div>
+                    </div>
+                  )
+                })}
+                <div style={{ fontSize: 10, color: '#33334a', marginTop: 8 }}>
+                  Coluna 30d = previsão de unidades necessárias para os próximos 30 dias
+                </div>
+              </div>
+          }
         </div>
       </div>
 
