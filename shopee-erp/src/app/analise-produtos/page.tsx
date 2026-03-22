@@ -11,6 +11,30 @@ const LOJA_COLORS: Record<string, string> = {
 }
 const TAXA_SHOPEE = 0.20
 
+// ── Famílias de produto (hardcoded) ──────────────────────────────────────────
+const FAMILIAS: Record<string, string> = {
+  FM50:      'Formas',
+  FM100:     'Formas',
+  FM200:     'Formas',
+  FM300:     'Formas',
+  KIT2TP:    'Tapetes',
+  KIT3TP:    'Tapetes',
+  KIT4TP:    'Tapetes',
+  KIT120:    'Saquinhos',
+  KIT240:    'Saquinhos',
+  KIT480:    'Saquinhos',
+  KITPS120B: 'Saquinhos',
+  KITPS240B: 'Saquinhos',
+  KITPS480B: 'Saquinhos',
+}
+const FAMILIA_CORES: Record<string, string> = {
+  'Todas':     '#ff6600',
+  'Formas':    '#f59e0b',
+  'Tapetes':   '#a855f7',
+  'Saquinhos': '#0ea5e9',
+}
+const FAMILIA_LISTA = ['Todas', 'Formas', 'Tapetes', 'Saquinhos']
+
 const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const P = (v: number) => `${((+v || 0) * 100).toFixed(1)}%`
 const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
@@ -51,13 +75,13 @@ export default function AnaliseProdutosPage() {
   const [skuMapData, setSkuMapData] = useState<any[]>([])
   const [estoque,    setEstoque]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
-  const [lojaFiltro, setLojaFiltro] = useState('Todas')
+  const [lojaFiltro,    setLojaFiltro]    = useState('Todas')
+  const [familiaFiltro, setFamiliaFiltro] = useState('Todas')  // NOVO
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [busca,      setBusca]      = useState('')
   const [ordenar,    setOrdenar]    = useState<'rec' | 'qtd' | 'lucro' | 'margem'>('rec')
 
-  // FIX: hook centralizado — lê e salva no localStorage, mesmo valor de todas as páginas
   const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   useEffect(() => { loadData() }, [])
@@ -97,15 +121,22 @@ export default function AnaliseProdutosPage() {
     const map: Record<string, any> = {}
     finF.forEach(f => {
       const sku = f.sku || 'SEM SKU'
-      if (!map[sku]) map[sku] = { sku, nome: f.nome_produto || f.produto || sku, rec: 0, lucro: 0, qtd: 0, lojas: new Set<string>() }
+      if (!map[sku]) map[sku] = {
+        sku,
+        nome:    f.nome_produto || f.produto || sku,
+        familia: FAMILIAS[sku] || 'Outros',
+        rec:     0,
+        lucro:   0,
+        qtd:     0,
+        pedidos: new Set<string>(),  // NOVO — pedidos distintos
+        lojas:   new Set<string>(),
+      }
 
       const rec   = f.valor_bruto || 0
-      // taxa real do banco quando disponível
       const taxas = (f.comissao_shopee && f.comissao_shopee > 0)
         ? f.comissao_shopee
         : rec * TAXA_SHOPEE
 
-      // custo produto: banco tem prioridade, senão cruza sku_map + estoque
       let cProd = (f.custo_produto && f.custo_produto > 0) ? f.custo_produto : 0
       if (!cProd) {
         const comps = skuMapData.filter(m => m.sku_venda === sku)
@@ -115,15 +146,14 @@ export default function AnaliseProdutosPage() {
         }, 0)
       }
 
-      // FIX: inclui custo embalagem (estava faltando)
-      const cEmb = 0 // embalagem já inclusa em calcCustoProd via estoque
-      // FIX: imposto do hook
+      const cEmb  = 0
       const imp   = rec * imposto
       const lucro = rec - taxas - cProd - cEmb - imp
 
-      map[sku].rec   += rec
-      map[sku].lucro += lucro
-      map[sku].qtd   += f.quantidade || 1
+      map[sku].rec    += rec
+      map[sku].lucro  += lucro
+      map[sku].qtd    += f.quantidade || 1
+      if (f.pedido) map[sku].pedidos.add(f.pedido)  // NOVO
       map[sku].lojas.add(f.loja || '')
     })
     return map
@@ -135,15 +165,32 @@ export default function AnaliseProdutosPage() {
     return Object.values(skuMap)
       .map((s: any) => ({
         ...s,
+        pedidosCount: s.pedidos.size,  // NOVO — converte Set para número
         margem:     s.rec > 0 ? s.lucro / s.rec : 0,
         adsRateado: totalRec > 0 ? (s.rec / totalRec) * totalAds : 0,
         lucroLiq:   s.lucro - (totalRec > 0 ? (s.rec / totalRec) * totalAds : 0),
       }))
-      .filter(s => !busca || s.sku.toLowerCase().includes(busca.toLowerCase()) || s.nome.toLowerCase().includes(busca.toLowerCase()))
+      .filter(s => {
+        // Filtro família
+        if (familiaFiltro !== 'Todas' && s.familia !== familiaFiltro) return false
+        // Filtro busca
+        if (busca && !s.sku.toLowerCase().includes(busca.toLowerCase()) && !s.nome.toLowerCase().includes(busca.toLowerCase())) return false
+        return true
+      })
       .sort((a: any, b: any) => b[ordenar] - a[ordenar])
-  }, [skuMap, busca, ordenar, totalAds, totalRec])
+  }, [skuMap, busca, ordenar, totalAds, totalRec, familiaFiltro])
 
   const top10 = rows.slice(0, 10)
+
+  function limparFiltros() {
+    setLojaFiltro('Todas')
+    setFamiliaFiltro('Todas')
+    setDateFrom('')
+    setDateTo('')
+    setBusca('')
+  }
+
+  const temFiltro = lojaFiltro !== 'Todas' || familiaFiltro !== 'Todas' || dateFrom || dateTo || busca
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 240 }}>
@@ -153,9 +200,9 @@ export default function AnaliseProdutosPage() {
 
   return (
     <div>
+      {/* HEADER */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 15, fontWeight: 800 }}>🔍 Análise de Produtos — Desempenho por SKU</h2>
-        {/* FIX: input de imposto salva no localStorage via hook */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
           <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
@@ -167,15 +214,34 @@ export default function AnaliseProdutosPage() {
 
       {/* FILTROS */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Loja */}
         <select value={lojaFiltro} onChange={e => setLojaFiltro(e.target.value)} style={{ ...S.inp, width: 'auto', fontSize: 12 } as any}>
           <option>Todas</option>{LOJAS.map(l => <option key={l}>{l}</option>)}
         </select>
+
+        {/* NOVO — Filtro Família */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {FAMILIA_LISTA.map(f => {
+            const ativo = familiaFiltro === f
+            const cor   = FAMILIA_CORES[f] || '#ff6600'
+            return (
+              <button key={f} onClick={() => setFamiliaFiltro(f)} style={{
+                background: ativo ? cor + '22' : 'transparent',
+                border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
+                color: ativo ? cor : '#555',
+                borderRadius: 6, padding: '4px 12px', cursor: 'pointer',
+                fontSize: 12, fontWeight: ativo ? 700 : 400,
+              }}>{f}</button>
+            )
+          })}
+        </div>
+
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 140 } as any} />
         <span style={{ color: '#555', fontSize: 12 }}>até</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 140 } as any} />
         <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="🔍 Buscar SKU..." style={{ ...S.inp, width: 160 } as any} />
-        {(lojaFiltro !== 'Todas' || dateFrom || dateTo || busca) && (
-          <button onClick={() => { setLojaFiltro('Todas'); setDateFrom(''); setDateTo(''); setBusca('') }} style={S.btnSm as any}>✕ Limpar</button>
+        {temFiltro && (
+          <button onClick={limparFiltros} style={S.btnSm as any}>✕ Limpar</button>
         )}
         <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
           {[['rec', '$ Receita'], ['qtd', '# Qtd'], ['lucro', '✓ Lucro'], ['margem', '% Margem']].map(([id, label]) => (
@@ -189,13 +255,17 @@ export default function AnaliseProdutosPage() {
         <span style={{ fontSize: 11, color: '#555' }}>
           🔴 Margem &lt; 10% — Crítico &nbsp;·&nbsp; 🟡 10–20% — Atenção &nbsp;·&nbsp; 🟢 &gt; 20% — Saudável
           &nbsp;·&nbsp; <span style={{ color: '#e67e22' }}>Ads rateados proporcionalmente ao faturamento de cada SKU</span>
+          &nbsp;·&nbsp; <span style={{ color: '#0ea5e9' }}>Pedidos = número de pedidos distintos com aquele SKU</span>
         </span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* GRÁFICO TOP 10 */}
         <div style={S.card}>
-          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📊 Top 10 SKUs — {ordenar === 'rec' ? 'Receita' : ordenar === 'qtd' ? 'Qtd' : ordenar === 'lucro' ? 'Lucro' : 'Margem'}</div>
+          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>
+            📊 Top 10 SKUs — {ordenar === 'rec' ? 'Receita' : ordenar === 'qtd' ? 'Qtd' : ordenar === 'lucro' ? 'Lucro' : 'Margem'}
+            {familiaFiltro !== 'Todas' && <span style={{ marginLeft: 8, fontSize: 10, color: FAMILIA_CORES[familiaFiltro], fontWeight: 400 }}>· {familiaFiltro}</span>}
+          </div>
           <MiniBar
             data={top10.map((s: any) => ({ l: s.sku, v: ordenar === 'margem' ? s.margem * 100 : s[ordenar] }))}
             height={130}
@@ -205,10 +275,13 @@ export default function AnaliseProdutosPage() {
 
         {/* RESUMO */}
         <div style={S.card}>
-          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>📈 Resumo Geral</div>
+          <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 12 }}>
+            📈 Resumo
+            {familiaFiltro !== 'Todas' && <span style={{ marginLeft: 8, fontSize: 10, color: FAMILIA_CORES[familiaFiltro], fontWeight: 400 }}>· {familiaFiltro}</span>}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {[
-              ['SKUs Únicos',    String(rows.length),                                                        '#a78bfa'],
+              ['SKUs',           String(rows.length),                                                        '#a78bfa'],
               ['Receita Total',  R(rows.reduce((s: any, r: any) => s + r.rec, 0)),                           '#ff9933'],
               ['Lucro Op Total', R(rows.reduce((s: any, r: any) => s + r.lucro, 0)),                         rows.reduce((s: any, r: any) => s + r.lucro, 0) >= 0 ? '#22c55e' : '#ef4444'],
               ['Total Ads',      R(totalAds),                                                                '#e67e22'],
@@ -229,14 +302,28 @@ export default function AnaliseProdutosPage() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>{['#', 'SKU Venda', 'Produto', 'Qtd Vendida', 'Receita Total', 'Lucro Op', 'Ads Rateado', 'Lucro Líq', 'Margem Op', 'Lojas'].map(h => <th key={h} style={S.th as any}>{h}</th>)}</tr>
+              <tr>
+                {['#', 'SKU Venda', 'Família', 'Produto', 'Pedidos', 'Qtd Vendida', 'Receita Total', 'Lucro Op', 'Ads Rateado', 'Lucro Líq', 'Margem Op', 'Lojas'].map(h => (
+                  <th key={h} style={S.th as any}>{h}</th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {rows.map((s: any, i: number) => (
                 <tr key={s.sku} style={{ borderBottom: '1px solid #1e1e2a' }}>
                   <td style={S.td as any}><span style={{ color: '#555', fontFamily: 'monospace' }}>{i + 1}</span></td>
                   <td style={S.td as any}><span style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11, fontWeight: 700 }}>{s.sku}</span></td>
+                  {/* NOVO — coluna família */}
+                  <td style={S.td as any}>
+                    <span style={{ background: (FAMILIA_CORES[s.familia] || '#555') + '22', color: FAMILIA_CORES[s.familia] || '#555', border: `1px solid ${(FAMILIA_CORES[s.familia] || '#555')}44`, borderRadius: 4, padding: '2px 7px', fontSize: 10, fontWeight: 700 }}>
+                      {s.familia}
+                    </span>
+                  </td>
                   <td style={S.td as any}><span style={{ fontWeight: 600 }}>{s.nome}</span></td>
+                  {/* NOVO — pedidos distintos */}
+                  <td style={{ ...S.td as any, textAlign: 'right' as any }}>
+                    <span style={{ fontFamily: 'monospace', color: '#0ea5e9' }}>{N(s.pedidosCount)}</span>
+                  </td>
                   <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace' }}>{N(s.qtd)}</span></td>
                   <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace' }}>{R(s.rec)}</span></td>
                   <td style={{ ...S.td as any, textAlign: 'right' as any }}><span style={{ fontFamily: 'monospace', color: s.lucro >= 0 ? '#22c55e' : '#ef4444', fontWeight: 700 }}>{R(s.lucro)}</span></td>
@@ -253,7 +340,7 @@ export default function AnaliseProdutosPage() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={10} style={{ ...S.td as any, textAlign: 'center', padding: 48, color: '#555' }}>Sem dados no período</td></tr>
+                <tr><td colSpan={12} style={{ ...S.td as any, textAlign: 'center', padding: 48, color: '#555' }}>Sem dados no período</td></tr>
               )}
             </tbody>
           </table>
