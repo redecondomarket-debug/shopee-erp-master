@@ -21,8 +21,8 @@ type Item = { id: string; sku_base: string; produto: string; estoque_atual: numb
 type MovEntry = { sku_base: string; quantidade: number; tipo: string }
 
 function Badge({ v, min }: { v: number; min: number }) {
-  const low = v <= min
   const empty = v <= 0
+  const low   = v <= min
   const color = empty ? '#ef4444' : low ? '#f59e0b' : '#22c55e'
   return (
     <span style={{ background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
@@ -34,9 +34,7 @@ function Badge({ v, min }: { v: number; min: number }) {
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-      <div style={{ ...S.card, width: '100%', maxWidth: 480, padding: '28px 32px', position: 'relative' }}>
-        {children}
-      </div>
+      <div style={{ ...S.card, width: '100%', maxWidth: 480, padding: '28px 32px' }}>{children}</div>
     </div>
   )
 }
@@ -80,11 +78,12 @@ export default function EstoquePage() {
     setTimeout(() => setToast({ msg: '', type: 'ok' }), 3000)
   }
 
-  // Histórico de compra = soma de todas as ENTRADAs na tabela movimentacoes
-  // + estoque_atual inicial (que foi definido manualmente no setup)
+  // Histórico de compra = estoque_atual (setup inicial) + SOMA(ENTRADAs em movimentacoes)
+  // IMPORTANTE: estoque_atual NO BANCO representa o valor inicial do setup e NUNCA é alterado
+  // após o setup. Todas as entradas posteriores vão APENAS para movimentacoes.
   const historicoCompra = useMemo(() => {
     const map: Record<string, number> = {}
-    items.forEach(i => { map[i.sku_base] = i.estoque_atual }) // base inicial
+    items.forEach(i => { map[i.sku_base] = i.estoque_atual }) // base: estoque inicial do setup
     movEntries.filter(m => m.tipo === 'ENTRADA').forEach(m => {
       map[m.sku_base] = (map[m.sku_base] || 0) + (m.quantidade || 0)
     })
@@ -122,22 +121,46 @@ export default function EstoquePage() {
     if (!item) { showToast('Selecione um produto', 'err'); return }
     if (!mov.quantidade || mov.quantidade <= 0) { showToast('Informe a quantidade', 'err'); return }
 
-    const novoEst = mov.tipo === 'AJUSTE'
-      ? mov.quantidade
-      : item.estoque_atual + mov.quantidade
-    const delta = mov.tipo === 'AJUSTE'
-      ? Math.abs(mov.quantidade - item.estoque_atual)
-      : mov.quantidade
+    if (mov.tipo === 'AJUSTE') {
+      // AJUSTE: define o novo estoque_atual (valor de setup)
+      // Aqui é a ÚNICA exceção onde estoque_atual é atualizado:
+      // o AJUSTE redefine a base do estoque (zera o histórico implicitamente)
+      const estoqueRealAtual = (historicoCompra[item.sku_base] || 0) - (consumoVendas[item.sku_base] || 0)
+      const delta = Math.abs(mov.quantidade - estoqueRealAtual)
 
-    await supabase.from('estoque').update({ estoque_atual: novoEst }).eq('id', item.id)
-    await supabase.from('movimentacoes').insert({
-      data: mov.data,
-      tipo: mov.tipo,
-      sku_base: mov.sku_base,
-      quantidade: delta,
-      origem: 'Manual',
-      observacao: mov.observacao,
-    })
+      // Para AJUSTE: atualiza estoque_atual e zera movimentacoes de ENTRADA
+      // para que a fórmula historicoCompra - consumo seja consistente
+      await supabase.from('estoque').update({ estoque_atual: mov.quantidade }).eq('id', item.id)
+
+      // Apaga ENTRADAs anteriores deste produto para evitar acúmulo incorreto
+      await supabase.from('movimentacoes')
+        .delete()
+        .eq('sku_base', item.sku_base)
+        .eq('tipo', 'ENTRADA')
+
+      // Registra o ajuste no histórico
+      await supabase.from('movimentacoes').insert({
+        data:        mov.data,
+        tipo:        'AJUSTE',
+        sku_base:    mov.sku_base,
+        quantidade:  delta,
+        origem:      'Manual',
+        observacao:  mov.observacao || `Ajuste para ${mov.quantidade} un`,
+      })
+    } else {
+      // FIX: ENTRADA — NÃO atualiza estoque_atual no banco
+      // Vai APENAS para movimentacoes
+      // historicoCompra = estoque_atual (setup) + SOMA(ENTRADAs) → já soma automaticamente
+      await supabase.from('movimentacoes').insert({
+        data:        mov.data,
+        tipo:        'ENTRADA',
+        sku_base:    mov.sku_base,
+        quantidade:  mov.quantidade,
+        origem:      'Manual',
+        observacao:  mov.observacao,
+      })
+    }
+
     showToast('Movimentação registrada!')
     setShowMov(false)
     setMov({ data: new Date().toISOString().slice(0,10), tipo: 'ENTRADA', sku_base: '', quantidade: 0, observacao: '' })
@@ -152,6 +175,7 @@ export default function EstoquePage() {
 
   async function limparTudo() {
     setLimpando(true)
+    // Zera movimentacoes e reseta estoque_atual para 0
     await supabase.from('movimentacoes').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     for (const i of items) await supabase.from('estoque').update({ estoque_atual: 0 }).eq('id', i.id)
     setShowDel(false); setLimpando(false)
@@ -198,7 +222,7 @@ export default function EstoquePage() {
       </div>
 
       {/* LEGENDA */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 11, color: '#55556a' }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 11, color: '#55556a', flexWrap: 'wrap' }}>
         <span>📥 <strong style={{ color: '#a78bfa' }}>Histórico de Compra</strong> = estoque inicial + entradas registradas</span>
         <span>📤 <strong style={{ color: '#f59e0b' }}>Consumo Vendas</strong> = calculado automaticamente pelas vendas importadas</span>
         <span>📦 <strong style={{ color: '#22c55e' }}>Estoque Real</strong> = Compras − Consumo</span>
@@ -211,7 +235,7 @@ export default function EstoquePage() {
             <thead>
               <tr>
                 {['SKU Base', 'Produto', 'Hist. Compra', 'Consumo Vendas', 'Estoque Real', 'Mínimo', 'Status', 'Ações'].map(h => (
-                  <th key={h} style={{ ...S.th, textAlign: h === 'Hist. Compra' || h === 'Consumo Vendas' || h === 'Estoque Real' || h === 'Mínimo' || h === 'Status' ? 'center' as any : S.th.textAlign }}>{h}</th>
+                  <th key={h} style={{ ...S.th, textAlign: ['Hist. Compra','Consumo Vendas','Estoque Real','Mínimo','Status'].includes(h) ? 'center' as any : S.th.textAlign }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -219,14 +243,14 @@ export default function EstoquePage() {
               {lista.length === 0 ? (
                 <tr><td colSpan={8} style={{ ...S.td, textAlign: 'center', padding: '40px', color: '#55556a' }}>Nenhum produto encontrado</td></tr>
               ) : lista.map(item => {
-                const histCompra   = historicoCompra[item.sku_base] || 0
-                const consumo      = consumoVendas[item.sku_base] || 0
-                const estoqueReal  = histCompra - consumo
-                const low          = estoqueReal <= item.estoque_minimo
-                const empty        = estoqueReal <= 0
-                const isEdit       = editId === item.id
-                const corStatus    = empty ? '#ef4444' : low ? '#f59e0b' : '#22c55e'
-                const labelStatus  = empty ? 'SEM ESTOQUE' : low ? 'BAIXO' : 'OK'
+                const histCompra  = historicoCompra[item.sku_base] || 0
+                const consumo     = consumoVendas[item.sku_base] || 0
+                const estoqueReal = histCompra - consumo
+                const low         = estoqueReal <= item.estoque_minimo
+                const empty       = estoqueReal <= 0
+                const isEdit      = editId === item.id
+                const corStatus   = empty ? '#ef4444' : low ? '#f59e0b' : '#22c55e'
+                const labelStatus = empty ? 'SEM ESTOQUE' : low ? 'BAIXO' : 'OK'
 
                 return (
                   <tr key={item.id} style={{ borderLeft: `3px solid ${low || empty ? corStatus : 'transparent'}` }}>
@@ -236,41 +260,29 @@ export default function EstoquePage() {
                         ? <input value={editVals.produto || ''} onChange={e => setEditVals({ ...editVals, produto: e.target.value })} style={{ ...S.inp, width: 180 }} />
                         : <span style={{ fontWeight: 500 }}>{item.produto}</span>}
                     </td>
-
-                    {/* HISTÓRICO DE COMPRA */}
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <span style={{ background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
                         {N(histCompra)} un
                       </span>
                     </td>
-
-                    {/* CONSUMO VENDAS */}
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <span style={{ background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b44', borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
                         {N(consumo)} un
                       </span>
                     </td>
-
-                    {/* ESTOQUE REAL */}
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <Badge v={estoqueReal} min={item.estoque_minimo} />
                     </td>
-
-                    {/* MÍNIMO */}
                     <td style={{ ...S.td, textAlign: 'center', color: '#55556a' }}>
                       {isEdit
                         ? <input type="number" value={editVals.estoque_minimo ?? ''} onChange={e => setEditVals({ ...editVals, estoque_minimo: +e.target.value })} style={{ ...S.inp, width: 80, textAlign: 'center' }} />
                         : `${item.estoque_minimo} un`}
                     </td>
-
-                    {/* STATUS */}
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <span style={{ background: corStatus + '22', color: corStatus, border: `1px solid ${corStatus}44`, borderRadius: 5, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>
                         {labelStatus}
                       </span>
                     </td>
-
-                    {/* AÇÕES */}
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                         {isEdit ? (
@@ -331,35 +343,50 @@ export default function EstoquePage() {
             <button onClick={() => setShowMov(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 18 }}>✕</button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div><label style={S.label}>Tipo</label>
+            <div>
+              <label style={S.label}>Tipo</label>
               <select value={mov.tipo} onChange={e => setMov({ ...mov, tipo: e.target.value })} style={S.inp}>
                 <option value="ENTRADA">➕ Entrada de Compra</option>
-                <option value="AJUSTE">🔧 Ajuste Manual</option>
+                <option value="AJUSTE">🔧 Ajuste Manual (redefine base)</option>
               </select>
             </div>
-            <div><label style={S.label}>Produto</label>
+            <div>
+              <label style={S.label}>Produto</label>
               <select value={mov.sku_base} onChange={e => setMov({ ...mov, sku_base: e.target.value })} style={S.inp}>
                 <option value="">Selecione...</option>
                 {items.map(i => <option key={i.id} value={i.sku_base}>{i.produto} ({i.sku_base})</option>)}
               </select>
             </div>
             <div>
-              <label style={S.label}>{mov.tipo === 'AJUSTE' ? 'Novo Estoque Total' : 'Quantidade Comprada'}</label>
+              <label style={S.label}>{mov.tipo === 'AJUSTE' ? 'Novo Estoque Total (absoluto)' : 'Quantidade Comprada'}</label>
               <input type="number" value={mov.quantidade || ''} onChange={e => setMov({ ...mov, quantidade: +e.target.value })} style={S.inp} min="0" />
             </div>
-            <div><label style={S.label}>Observação</label>
+            <div>
+              <label style={S.label}>Observação</label>
               <input value={mov.observacao} onChange={e => setMov({ ...mov, observacao: e.target.value })} placeholder="Ex: Compra fornecedor XYZ..." style={S.inp} />
             </div>
-            {mov.sku_base && mov.tipo === 'ENTRADA' && mov.quantidade > 0 && (
+
+            {/* Preview do resultado */}
+            {mov.sku_base && mov.quantidade > 0 && (
               <div style={{ background: '#0f1a0f', border: '1px solid #22c55e33', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
-                <span style={{ color: '#55556a' }}>Novo histórico: </span>
-                <strong style={{ color: '#22c55e' }}>
-                  {N((historicoCompra[mov.sku_base] || 0) + mov.quantidade)} un
-                </strong>
-                <span style={{ color: '#55556a' }}> → Estoque real: </span>
-                <strong style={{ color: '#22c55e' }}>
-                  {N((historicoCompra[mov.sku_base] || 0) + mov.quantidade - (consumoVendas[mov.sku_base] || 0))} un
-                </strong>
+                {mov.tipo === 'ENTRADA' ? (
+                  <>
+                    <span style={{ color: '#55556a' }}>Novo histórico: </span>
+                    <strong style={{ color: '#22c55e' }}>
+                      {N((historicoCompra[mov.sku_base] || 0) + mov.quantidade)} un
+                    </strong>
+                    <span style={{ color: '#55556a' }}> → Estoque real: </span>
+                    <strong style={{ color: '#22c55e' }}>
+                      {N((historicoCompra[mov.sku_base] || 0) + mov.quantidade - (consumoVendas[mov.sku_base] || 0))} un
+                    </strong>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ color: '#f59e0b' }}>⚠️ Ajuste redefine base: estoque real passará a ser </span>
+                    <strong style={{ color: '#22c55e' }}>{N(mov.quantidade)} un</strong>
+                    <span style={{ color: '#55556a' }}> (entradas anteriores serão removidas)</span>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -377,7 +404,9 @@ export default function EstoquePage() {
             <span style={{ fontSize: 22 }}>⚠️</span>
             <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>Zerar Estoque</h3>
           </div>
-          <p style={{ fontSize: 13, color: '#9090aa', marginBottom: 8 }}>Isso vai <strong style={{ color: '#e2e2f0' }}>zerar</strong> o estoque atual e apagar o histórico de movimentações. Os produtos não serão excluídos.</p>
+          <p style={{ fontSize: 13, color: '#9090aa', marginBottom: 8 }}>
+            Isso vai <strong style={{ color: '#e2e2f0' }}>zerar</strong> o estoque atual e apagar o histórico de movimentações. Os produtos não serão excluídos.
+          </p>
           <p style={{ fontSize: 12, color: '#ef4444', marginBottom: 20 }}>Esta ação não pode ser desfeita.</p>
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => setShowDel(false)} style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
