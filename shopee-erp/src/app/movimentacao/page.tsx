@@ -12,12 +12,12 @@ const LOJA_CORES: Record<string, string> = {
 const D = (s: string) => { if (!s) return ''; const [y,m,d] = String(s).slice(0,10).split('-'); return d&&m&&y?`${d}/${m}/${y}`:s }
 
 const S: Record<string, React.CSSProperties> = {
-  page:  { padding: '20px 24px', width: '100%', boxSizing: 'border-box' },
-  card:  { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
-  th:    { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
-  td:    { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
-  inp:   { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
-  btnSm: { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
+  page:     { padding: '20px 24px', width: '100%', boxSizing: 'border-box' },
+  card:     { background: '#16161f', border: '1px solid #222232', borderRadius: 12, padding: '18px 20px' },
+  th:       { padding: '10px 14px', textAlign: 'left' as any, fontSize: 11, fontWeight: 700, color: '#55556a', letterSpacing: 1, textTransform: 'uppercase' as any, borderBottom: '1px solid #1e1e2c', whiteSpace: 'nowrap' as any, background: '#13131e' },
+  td:       { padding: '10px 14px', fontSize: 13, borderBottom: '1px solid #1a1a26', whiteSpace: 'nowrap' as any, color: '#e2e2f0' },
+  inp:      { background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 8, padding: '8px 12px', color: '#e2e2f0', fontSize: 13, outline: 'none', boxSizing: 'border-box' as any },
+  btnSm:    { background: '#ff660018', color: '#ff6600', border: '1px solid #ff660033', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 12 },
   btnGhost: { background: 'transparent', color: '#9090aa', border: '1px solid #2a2a3a', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 500, fontSize: 12 },
 }
 
@@ -28,32 +28,67 @@ type MovRow = {
 }
 
 export default function MovimentacaoPage() {
-  const [financeiro, setFinanceiro] = useState<any[]>([])
-  const [skuMap,     setSkuMap]     = useState<any[]>([])
-  const [estoque,    setEstoque]    = useState<any[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [lojaFilter, setLojaFilter] = useState('')
-  const [dateFrom,   setDateFrom]   = useState('')
-  const [dateTo,     setDateTo]     = useState('')
-  const [skuFilter,  setSkuFilter]  = useState('')
-  const [expandido,  setExpandido]  = useState<Record<string, boolean>>({})
+  const [financeiro,   setFinanceiro]   = useState<any[]>([])
+  const [skuMap,       setSkuMap]       = useState<any[]>([])
+  const [estoque,      setEstoque]      = useState<any[]>([])
+  const [movimentacoes,setMovimentacoes]= useState<any[]>([])  // FIX: carrega movimentacoes para estoqueReal
+  const [loading,      setLoading]      = useState(true)
+  const [lojaFilter,   setLojaFilter]   = useState('')
+  const [dateFrom,     setDateFrom]     = useState('')
+  const [dateTo,       setDateTo]       = useState('')
+  const [skuFilter,    setSkuFilter]    = useState('')
+  const [expandido,    setExpandido]    = useState<Record<string, boolean>>({})
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
-    const [finRes, mapRes, estRes] = await Promise.all([
+    const [finRes, mapRes, estRes, movRes] = await Promise.all([
       supabase.from('financeiro').select('data,loja,pedido,sku,quantidade').order('data', { ascending: false }).limit(2000),
       supabase.from('sku_map').select('sku_venda,sku_base,quantidade'),
-      supabase.from('estoque').select('sku_base,produto,estoque_atual'),
+      supabase.from('estoque').select('sku_base,produto,estoque_atual,estoque_minimo'),
+      supabase.from('movimentacoes').select('sku_base,quantidade,tipo'),  // FIX
     ])
     setFinanceiro(finRes.data || [])
     setSkuMap(mapRes.data || [])
     setEstoque(estRes.data || [])
+    setMovimentacoes(movRes.data || [])
     setLoading(false)
   }
 
-  const movimentacoes = useMemo((): MovRow[] => {
+  // FIX: historicoCompra = estoque_atual (setup) + SOMA(ENTRADAs em movimentacoes)
+  const historicoCompra = useMemo(() => {
+    const map: Record<string, number> = {}
+    estoque.forEach(e => { map[e.sku_base] = e.estoque_atual })
+    movimentacoes.filter(m => m.tipo === 'ENTRADA').forEach(m => {
+      map[m.sku_base] = (map[m.sku_base] || 0) + (m.quantidade || 0)
+    })
+    return map
+  }, [estoque, movimentacoes])
+
+  // Consumo total histórico por produto base (todos os pedidos do financeiro)
+  const consumoTotal = useMemo(() => {
+    const map: Record<string, number> = {}
+    financeiro.forEach(f => {
+      const skuVenda = (f.sku || '').toUpperCase().trim()
+      const comps = skuMap.filter(m => (m.sku_venda || '').toUpperCase().trim() === skuVenda)
+      comps.forEach(c => {
+        map[c.sku_base] = (map[c.sku_base] || 0) + (c.quantidade || 1) * (f.quantidade || 1)
+      })
+    })
+    return map
+  }, [financeiro, skuMap])
+
+  // FIX: estoqueReal = historicoCompra - consumoTotal (igual ao estoque/page.tsx)
+  const estoqueReal = useMemo(() => {
+    const map: Record<string, number> = {}
+    estoque.forEach(e => {
+      map[e.sku_base] = (historicoCompra[e.sku_base] || 0) - (consumoTotal[e.sku_base] || 0)
+    })
+    return map
+  }, [estoque, historicoCompra, consumoTotal])
+
+  const movimentacoesFiltradas = useMemo((): MovRow[] => {
     return financeiro.map(f => {
       const skuVenda = (f.sku || '').toUpperCase().trim()
       const mapeamentos = skuMap.filter(m => (m.sku_venda || '').toUpperCase().trim() === skuVenda)
@@ -73,14 +108,15 @@ export default function MovimentacaoPage() {
     })
   }, [financeiro, skuMap, estoque])
 
-  const filtradas = useMemo(() => movimentacoes.filter(m => {
+  const filtradas = useMemo(() => movimentacoesFiltradas.filter(m => {
     if (lojaFilter && m.loja !== lojaFilter) return false
     if (dateFrom && m.data < dateFrom) return false
     if (dateTo   && m.data > dateTo)   return false
     if (skuFilter && !m.sku_venda.includes(skuFilter.toUpperCase())) return false
     return true
-  }), [movimentacoes, lojaFilter, dateFrom, dateTo, skuFilter])
+  }), [movimentacoesFiltradas, lojaFilter, dateFrom, dateTo, skuFilter])
 
+  // Resumo por produto base (usando pedidos filtrados para consumo do período)
   const resumoPorBase = useMemo(() => {
     const map: Record<string, { sku_base: string; produto: string; total: number; porLoja: Record<string, number> }> = {}
     filtradas.forEach(m => {
@@ -129,7 +165,9 @@ export default function MovimentacaoPage() {
         <span style={{ color: '#555', fontSize: 12 }}>até</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 148 } as any} />
         <input value={skuFilter} onChange={e => setSkuFilter(e.target.value)} placeholder="Filtrar SKU..." style={{ ...S.inp, width: 140 } as any} />
-        {temFiltro && <button onClick={() => { setLojaFilter(''); setDateFrom(''); setDateTo(''); setSkuFilter('') }} style={S.btnGhost}>✕ Limpar</button>}
+        {temFiltro && (
+          <button onClick={() => { setLojaFilter(''); setDateFrom(''); setDateTo(''); setSkuFilter('') }} style={S.btnGhost}>✕ Limpar</button>
+        )}
       </div>
 
       {/* RESUMO POR PRODUTO BASE */}
@@ -142,11 +180,12 @@ export default function MovimentacaoPage() {
             <thead>
               <tr>
                 <th style={S.th}>Produto Base</th>
-                <th style={{ ...S.th, textAlign: 'center' as any }}>Total</th>
+                <th style={{ ...S.th, textAlign: 'center' as any }}>Total no período</th>
                 {LOJAS.map(l => (
                   <th key={l} style={{ ...S.th, textAlign: 'center' as any, color: LOJA_CORES[l] }}>{l.split(' ')[0]}</th>
                 ))}
-                <th style={{ ...S.th, textAlign: 'center' as any }}>Estoque</th>
+                {/* FIX: coluna renomeada para "Estoque Real" — agora usa historicoCompra - consumo */}
+                <th style={{ ...S.th, textAlign: 'center' as any }}>Estoque Real</th>
                 <th style={{ ...S.th, textAlign: 'center' as any }}>Cobertura</th>
               </tr>
             </thead>
@@ -154,11 +193,14 @@ export default function MovimentacaoPage() {
               {resumoPorBase.length === 0 ? (
                 <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center' as any, padding: '40px', color: '#55556a' }}>Nenhuma movimentação no período</td></tr>
               ) : resumoPorBase.map(r => {
-                const est = estoque.find(e => e.sku_base === r.sku_base)
-                const estoqueAtual = est?.estoque_atual || 0
-                const consumoDia = r.total / diasPeriodo
-                const diasCobertura = consumoDia > 0 ? Math.floor(estoqueAtual / consumoDia) : 999
+                // FIX: usa estoqueReal calculado (historicoCompra - consumoTotal)
+                // em vez de est.estoque_atual direto do banco
+                const estReal      = estoqueReal[r.sku_base] ?? 0
+                const consumoDia   = r.total / diasPeriodo
+                // FIX: cobertura baseada no estoqueReal correto
+                const diasCobertura = consumoDia > 0 ? Math.floor(estReal / consumoDia) : 999
                 const cor = diasCobertura >= 20 ? '#22c55e' : diasCobertura >= 10 ? '#f59e0b' : '#ef4444'
+
                 return (
                   <tr key={r.sku_base}>
                     <td style={S.td}>
@@ -169,11 +211,16 @@ export default function MovimentacaoPage() {
                     {LOJAS.map(l => (
                       <td key={l} style={{ ...S.td, textAlign: 'center' as any, color: '#9090aa' }}>{r.porLoja[l] || 0}</td>
                     ))}
+                    {/* FIX: mostra estoqueReal (não estoque_atual do banco) */}
                     <td style={{ ...S.td, textAlign: 'center' as any }}>
-                      <span style={{ background: estoqueAtual > 0 ? '#0ea5e922' : '#ef444422', color: estoqueAtual > 0 ? '#0ea5e9' : '#ef4444', border: `1px solid ${estoqueAtual > 0 ? '#0ea5e944' : '#ef444444'}`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>{estoqueAtual} un</span>
+                      <span style={{ background: estReal > 0 ? '#22c55e22' : '#ef444422', color: estReal > 0 ? '#22c55e' : '#ef4444', border: `1px solid ${estReal > 0 ? '#22c55e44' : '#ef444444'}`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                        {estReal} un
+                      </span>
                     </td>
                     <td style={{ ...S.td, textAlign: 'center' as any }}>
-                      <span style={{ background: cor + '22', color: cor, border: `1px solid ${cor}44`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>{diasCobertura >= 999 ? '∞' : `${diasCobertura}d`}</span>
+                      <span style={{ background: cor + '22', color: cor, border: `1px solid ${cor}44`, borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                        {diasCobertura >= 999 ? '∞' : `${diasCobertura}d`}
+                      </span>
                     </td>
                   </tr>
                 )
@@ -200,22 +247,29 @@ export default function MovimentacaoPage() {
             </thead>
             <tbody>
               {filtradas.length === 0 ? (
-                <tr><td colSpan={6} style={{ ...S.td, textAlign: 'center' as any, padding: '60px', color: '#55556a' }}>
-                  <div style={{ fontSize: 32, marginBottom: 12 }}>📦</div>
-                  <div>Nenhuma movimentação encontrada</div>
-                  <div style={{ fontSize: 11, marginTop: 4 }}>Importe pedidos no Financeiro para ver o consumo aqui</div>
-                </td></tr>
+                <tr>
+                  <td colSpan={6} style={{ ...S.td, textAlign: 'center' as any, padding: '60px', color: '#55556a' }}>
+                    <div style={{ fontSize: 32, marginBottom: 12 }}>📦</div>
+                    <div>Nenhuma movimentação encontrada</div>
+                    <div style={{ fontSize: 11, marginTop: 4 }}>Importe pedidos no Financeiro para ver o consumo aqui</div>
+                  </td>
+                </tr>
               ) : filtradas.slice(0, 200).map((m, i) => {
-                const key = `${m.pedido}-${m.sku_venda}-${i}`
+                const key   = `${m.pedido}-${m.sku_venda}-${i}`
                 const aberto = expandido[key]
-                const cor = LOJA_CORES[m.loja] || '#888'
+                const cor   = LOJA_CORES[m.loja] || '#888'
                 return (
                   <>
-                    <tr key={key} onClick={() => setExpandido(p => ({ ...p, [key]: !p[key] }))}
+                    <tr key={key}
+                      onClick={() => setExpandido(p => ({ ...p, [key]: !p[key] }))}
                       style={{ cursor: 'pointer', background: aberto ? '#13131e' : 'transparent' }}>
                       <td style={{ ...S.td, color: '#55556a' }}>{D(m.data)}</td>
                       <td style={{ ...S.td, fontFamily: 'monospace', color: '#ff6600', fontWeight: 600 }}>{m.sku_venda}</td>
-                      <td style={S.td}><span style={{ background: cor + '22', color: cor, border: `1px solid ${cor}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>{m.loja.split(' ')[0]}</span></td>
+                      <td style={S.td}>
+                        <span style={{ background: cor + '22', color: cor, border: `1px solid ${cor}44`, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>
+                          {m.loja.split(' ')[0]}
+                        </span>
+                      </td>
                       <td style={{ ...S.td, textAlign: 'center' as any, fontWeight: 700 }}>{m.quantidade}</td>
                       <td style={{ ...S.td, fontFamily: 'monospace', fontSize: 11, color: '#55556a' }}>#{m.pedido?.slice(-8)}</td>
                       <td style={{ ...S.td, textAlign: 'center' as any, color: '#55556a' }}>{aberto ? '▲' : '▼'}</td>
@@ -224,17 +278,17 @@ export default function MovimentacaoPage() {
                       <tr key={key + '_exp'}>
                         <td colSpan={6} style={{ ...S.td, background: '#0d0d14', paddingLeft: 48 }}>
                           <div style={{ fontSize: 10, color: '#444', marginBottom: 6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8 }}>Componentes consumidos:</div>
-                          {m.componentes.map((c, ci) => {
-                            const est = estoque.find(e => e.sku_base === c.sku_base)
-                            return (
-                              <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0', fontSize: 13 }}>
-                                <span style={{ background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{c.sku_base}</span>
-                                <span style={{ color: '#9090aa', fontSize: 12 }}>{c.produto}</span>
-                                <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#ef4444' }}>−{c.qtd_consumida} un</span>
-                                <span style={{ fontSize: 11, color: '#55556a' }}>(estoque: {est?.estoque_atual ?? '?'})</span>
-                              </div>
-                            )
-                          })}
+                          {m.componentes.map((c, ci) => (
+                            <div key={ci} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 0', fontSize: 13 }}>
+                              <span style={{ background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700, fontFamily: 'monospace' }}>{c.sku_base}</span>
+                              <span style={{ color: '#9090aa', fontSize: 12 }}>{c.produto}</span>
+                              <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#ef4444' }}>−{c.qtd_consumida} un</span>
+                              {/* FIX: mostra estoqueReal em vez de estoque_atual */}
+                              <span style={{ fontSize: 11, color: '#55556a' }}>
+                                (estoque real: {estoqueReal[c.sku_base] ?? '?'} un)
+                              </span>
+                            </div>
+                          ))}
                         </td>
                       </tr>
                     )}
@@ -242,9 +296,11 @@ export default function MovimentacaoPage() {
                 )
               })}
               {filtradas.length > 200 && (
-                <tr><td colSpan={6} style={{ ...S.td, textAlign: 'center' as any, color: '#55556a', fontSize: 12 }}>
-                  Mostrando 200 de {filtradas.length} registros. Use os filtros para refinar.
-                </td></tr>
+                <tr>
+                  <td colSpan={6} style={{ ...S.td, textAlign: 'center' as any, color: '#55556a', fontSize: 12 }}>
+                    Mostrando 200 de {filtradas.length} registros. Use os filtros para refinar.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
