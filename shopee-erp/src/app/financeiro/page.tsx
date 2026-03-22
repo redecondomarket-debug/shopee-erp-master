@@ -412,7 +412,7 @@ export default function FinanceiroPage() {
       {/* TABELA PRINCIPAL */}
       <div style={S.card}>
         <Table
-          headers={['Data', 'Loja', 'Pedido', 'SKU', 'Produto', 'Qtd', 'Vl Unit', 'Rec Bruta', 'Taxa Shop', 'Custo Prod', 'Imposto', 'Custo Total', 'Lucro Op', 'Margem', '']}
+          headers={['Data', 'Loja', 'Pedido', 'SKU', 'Produto', 'Qtd', 'Vl Unit', 'Rec Bruta', 'Taxa Shop', 'Renda Est.', 'Custo Prod', 'Imposto', 'Custo Total', 'Lucro Op', 'Margem', '']}
           rows={filtered.map(p => [
             D(p.data),
             <span style={{ color: LOJA_COLORS[p.loja] || '#ff6600', fontWeight: 600, fontSize: 11 }}>{(p.loja || '').split(' ')[0]}</span>,
@@ -423,6 +423,7 @@ export default function FinanceiroPage() {
             R(p.quantidade > 0 ? p.recBruta / p.quantidade : 0),
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.recBruta)}</span>,
             <span style={{ fontFamily: 'monospace', color: '#f59e0b' }}>{R(p.taxaShopee)}</span>,
+            <span style={{ fontFamily: 'monospace', color: '#0ea5e9', fontWeight: 600 }}>{R((p.recBruta || 0) - (p.taxaShopee || 0))}</span>,
             <span style={{ fontFamily: 'monospace' }}>{R(p.custoProd || 0)}</span>,
             <span style={{ fontFamily: 'monospace' }}>{R(p.imp)}</span>,
             <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{R(p.custoTotal)}</span>,
