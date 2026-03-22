@@ -104,67 +104,120 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   )
 }
 
-// ── Gráfico barras por mês + linha % variação (faixa separada) ────────────────
+// ── Gráfico barras por mês + linha % variação (faixas fixas separadas) ──────
 function GraficoMes({ data }: { data: { l: string; v: number; var: number | null }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados</div>
+
+  // SVG dividido em 2 faixas fixas — linha SEMPRE acima, barras SEMPRE abaixo
+  // Faixa LINHA: y 18..88  (altura 70px) — escala própria de %
+  // Separador:   y 96
+  // Faixa BARRA: y 110..244 (altura 134px) — escala de R$
   const W = 760, H = 280
   const PL = 62, PR = 20, PB = 36
-  const BAR_TOP = 110, BAR_BOT = H - PB
-  const BAR_H   = BAR_BOT - BAR_TOP
-  const LINE_TOP = 14, LINE_BOT = 96
-  const LINE_H   = LINE_BOT - LINE_TOP
-  const iW   = W - PL - PR
-  const n    = data.length
-  const bW   = Math.max(24, iW / n - 10)
-  const xc   = (i: number) => PL + (i + 0.5) * (iW / n)
-  const max  = Math.max(...data.map(d => d.v), 1)
-  const vars  = data.map(d => d.var).filter(v => v !== null) as number[]
-  const vMin  = vars.length ? Math.min(...vars) - 5 : -20
-  const vMax  = vars.length ? Math.max(...vars) + 5 : 20
-  const vRng  = Math.max(vMax - vMin, 1)
-  const yLn  = (v: number) => LINE_TOP + LINE_H * (1 - (v - vMin) / vRng)
-  const pts = data.map((d, i) => d.var !== null ? `${xc(i)},${yLn(d.var!)}` : null).filter(Boolean).join(' ')
-  const barTicks = [0, 0.5, 1].map(p => ({ v: max * p, y: BAR_BOT - BAR_H * p }))
+
+  const L_TOP = 18,  L_BOT = 88   // faixa da linha de %
+  const B_TOP = 110, B_BOT = H - PB  // faixa das barras
+  const L_H = L_BOT - L_TOP
+  const B_H = B_BOT - B_TOP
+
+  const iW = W - PL - PR
+  const n  = data.length
+  const bW = Math.max(24, iW / n - 10)
+  const xc = (i: number) => PL + (i + 0.5) * (iW / n)
+  const max = Math.max(...data.map(d => d.v), 1)
+
+  // Escala da linha: min..max das variações com margem de 10%
+  const vars = data.map(d => d.var).filter(v => v !== null) as number[]
+  const vRaw = vars.length ? vars : [0]
+  const vPad = Math.max((Math.max(...vRaw) - Math.min(...vRaw)) * 0.15, 10)
+  const vMin = Math.min(...vRaw) - vPad
+  const vMax = Math.max(...vRaw) + vPad
+  const vRng = Math.max(vMax - vMin, 1)
+
+  // yLn: posição Y DENTRO da faixa L_TOP..L_BOT
+  const yLn = (v: number) => L_TOP + L_H * (1 - (v - vMin) / vRng)
+
+  const pts = data
+    .map((d, i) => d.var !== null ? `${xc(i)},${yLn(d.var!)}` : null)
+    .filter(Boolean).join(' ')
+
   const fmtV = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
+  const barTicks = [0, 0.5, 1].map(p => ({ v: max * p, y: B_BOT - B_H * p }))
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
-      <line x1={PL} x2={W - PR} y1={LINE_BOT + 6} y2={LINE_BOT + 6} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="4,4" />
+
+      {/* Linha divisória entre as duas faixas */}
+      <line x1={PL} x2={W - PR} y1={96} y2={96}
+        stroke="#2a2a3a" strokeWidth={1} strokeDasharray="5,4" />
+
+      {/* Eixo Y das barras */}
       {barTicks.map((t, i) => (
         <g key={i}>
-          <line x1={PL} x2={W - PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,4" />
-          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">{fmtV(t.v)}</text>
+          <line x1={PL} x2={W - PR} y1={t.y} y2={t.y}
+            stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,5" />
+          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">
+            {fmtV(t.v)}
+          </text>
         </g>
       ))}
+
+      {/* Barras */}
       {data.map((d, i) => {
-        const bh = Math.max((d.v / max) * BAR_H, 2)
+        const bh = Math.max((d.v / max) * B_H, 2)
         const bx = xc(i) - bW / 2
-        const by = BAR_BOT - bh
+        const by = B_BOT - bh
         return (
           <g key={i}>
-            <rect x={bx} y={by} width={bW} height={bh} rx={4} fill="#1a4a8a" fillOpacity={0.92} />
-            <text x={xc(i)} y={by - 5} textAnchor="middle" fontSize={9} fill="#5599ff" fontWeight="700">{fmtV(d.v)}</text>
-            <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={10.5} fill="#9090aa" fontWeight="600">{d.l}</text>
+            <rect x={bx} y={by} width={bW} height={bh} rx={4}
+              fill="#1a4a8a" fillOpacity={0.92} />
+            <text x={xc(i)} y={by - 5} textAnchor="middle"
+              fontSize={9.5} fill="#5599ff" fontWeight="700">
+              {fmtV(d.v)}
+            </text>
+            <text x={xc(i)} y={H - PB + 14} textAnchor="middle"
+              fontSize={11} fill="#9090aa" fontWeight="600">
+              {d.l}
+            </text>
           </g>
         )
       })}
-      {pts && <polyline points={pts} fill="none" stroke="#22c55e" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
+
+      {/* Linha de variação — restrita à faixa L_TOP..L_BOT */}
+      {pts && (
+        <polyline points={pts} fill="none" stroke="#22c55e"
+          strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      )}
+
+      {/* Pontos + rótulos da % — sempre dentro da faixa de linha */}
       {data.map((d, i) => {
         if (d.var === null) return null
-        const cy  = yLn(d.var)
+        const cy  = yLn(d.var)   // y garantido entre L_TOP e L_BOT
         const cor = d.var >= 0 ? '#22c55e' : '#ef4444'
+        // Rótulo: acima do ponto se tiver espaço, senão abaixo
+        const lblY = cy - L_TOP > 16 ? cy - 8 : cy + 17
         return (
           <g key={`v${i}`}>
-            <circle cx={xc(i)} cy={cy} r={5} fill={cor} stroke="#16161f" strokeWidth={2} />
-            <text x={xc(i)} y={cy - 8} textAnchor="middle" fontSize={10} fill={cor} fontWeight="800">
+            <circle cx={xc(i)} cy={cy} r={5} fill={cor}
+              stroke="#16161f" strokeWidth={2} />
+            <text x={xc(i)} y={lblY} textAnchor="middle"
+              fontSize={10} fill={cor} fontWeight="800">
               {d.var >= 0 ? '+' : ''}{d.var.toFixed(1)}%
             </text>
           </g>
         )
       })}
-      <rect x={PL} y={LINE_BOT + 16} width={11} height={10} rx={2} fill="#1a4a8a" fillOpacity={0.9} />
-      <text x={PL + 15} y={LINE_BOT + 25} fontSize={9} fill="#5599ff">Faturamento mensal</text>
-      <circle cx={PL + 155} cy={LINE_BOT + 21} r={4} fill="#22c55e" />
-      <text x={PL + 163} y={LINE_BOT + 25} fontSize={9} fill="#22c55e">% variação vs mês anterior</text>
+
+      {/* Legenda */}
+      <rect x={PL} y={96 + 12} width={11} height={10} rx={2}
+        fill="#1a4a8a" fillOpacity={0.9} />
+      <text x={PL + 15} y={96 + 21} fontSize={9} fill="#5599ff">
+        Faturamento mensal
+      </text>
+      <circle cx={PL + 155} cy={96 + 17} r={4} fill="#22c55e" />
+      <text x={PL + 163} y={96 + 21} fontSize={9} fill="#22c55e">
+        % variação vs mês anterior
+      </text>
     </svg>
   )
 }
