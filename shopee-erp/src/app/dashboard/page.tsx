@@ -185,7 +185,7 @@ export default function DashboardPage() {
     const sku = f.sku || 'SEM SKU'
     if (!skuAgg[sku]) skuAgg[sku] = { sku, nome: f.produto || sku, rec: 0, lucro: 0, qtd: 0 }
     skuAgg[sku].rec   += f.valor_bruto || 0
-    skuAgg[sku].lucro += calcCustoProd(f.sku || '', f.quantidade || 1)
+    const rec_s=f.valor_bruto||0;const taxas_s=(f.comissao_shopee&&f.comissao_shopee>0)?f.comissao_shopee:rec_s*TAXA_SHOPEE;const cprod_s=calcCustoProd(f.sku||'',f.quantidade||1);const imp_s=rec_s*imposto;skuAgg[sku].lucro+=rec_s-taxas_s-cprod_s-imp_s
     skuAgg[sku].qtd   += f.quantidade || 1
   })
   const topSkus = Object.values(skuAgg).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
@@ -276,7 +276,7 @@ export default function DashboardPage() {
               <span style={{ maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>{s.nome}</span>,
               N(s.qtd),
               <span style={{ fontFamily: 'monospace' }}>{R(s.rec)}</span>,
-              <StatusBadge v={s.rec > 0 ? (s.rec - s.lucro) / s.rec : 0} />,
+              <StatusBadge v={s.rec > 0 ? s.lucro / s.rec : 0} />,
             ])}
             emptyMsg="Sem dados de vendas"
           />
