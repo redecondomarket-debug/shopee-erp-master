@@ -65,22 +65,20 @@ function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]
 // ── Gráfico barras por dia ────────────────────────────────────────────────────
 function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>
-  const W = 760, H = 200, PL = 52, PR = 10, PT = 24, PB = 34
+  const W = 760, H = 210, PL = 56, PR = 10, PT = 28, PB = 38
   const max   = Math.max(...data.map(d => d.v), 1)
   const iW    = W - PL - PR
   const iH    = H - PT - PB
   const bW    = Math.max(4, Math.min(28, iW / data.length - 3))
   const xc    = (i: number) => PL + (i + 0.5) * (iW / data.length)
-  const yv    = (v: number) => PT + iH - (v / max) * iH
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => ({ v: max * p, y: PT + iH * (1 - p) }))
+  const fmtV  = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
       {ticks.map((t, i) => (
         <g key={i}>
           <line x1={PL} x2={W - PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} />
-          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">
-            {t.v >= 1000 ? `R$${(t.v / 1000).toFixed(0)}k` : `R$${t.v.toFixed(0)}`}
-          </text>
+          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">{fmtV(t.v)}</text>
         </g>
       ))}
       {data.map((d, i) => {
@@ -89,14 +87,14 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
         const by = PT + iH - bh
         return (
           <g key={i}>
-            <rect x={bx} y={by} width={bW} height={bh} rx={3} fill="#ff6600" fillOpacity={0.85} />
-            {bW > 14 && (
-              <text x={xc(i)} y={by - 3} textAnchor="middle" fontSize={8} fill="#ff9933" fontWeight="700">
-                {d.v >= 1000 ? `${(d.v / 1000).toFixed(1)}k` : d.v.toFixed(0)}
+            <rect x={bx} y={by} width={bW} height={bh} rx={3} fill="#ff6600" fillOpacity={0.88} />
+            {bW > 10 && (
+              <text x={xc(i)} y={by - 4} textAnchor="middle" fontSize={7.5} fill="#ff9933" fontWeight="700">
+                {fmtV(d.v)}
               </text>
             )}
-            <text x={xc(i)} y={H - PB + 13} textAnchor="middle" fontSize={8.5} fill="#44445a"
-              transform={data.length > 20 ? `rotate(-40,${xc(i)},${H - PB + 13})` : ''}>
+            <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={8.5} fill="#44445a"
+              transform={data.length > 20 ? `rotate(-40,${xc(i)},${H - PB + 14})` : ''}>
               {d.l}
             </text>
           </g>
@@ -106,55 +104,50 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   )
 }
 
-// ── Gráfico barras por mês + linha % variação ─────────────────────────────────
+// ── Gráfico barras por mês + linha % variação (faixa separada) ────────────────
 function GraficoMes({ data }: { data: { l: string; v: number; var: number | null }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados</div>
-  const W = 760, H = 230, PL = 58, PR = 20, PT = 40, PB = 34
-  const max  = Math.max(...data.map(d => d.v), 1)
+  const W = 760, H = 280
+  const PL = 62, PR = 20, PB = 36
+  const BAR_TOP = 110, BAR_BOT = H - PB
+  const BAR_H   = BAR_BOT - BAR_TOP
+  const LINE_TOP = 14, LINE_BOT = 96
+  const LINE_H   = LINE_BOT - LINE_TOP
   const iW   = W - PL - PR
-  const iH   = H - PT - PB
-  const bW   = Math.max(20, iW / data.length - 8)
-  const xc   = (i: number) => PL + (i + 0.5) * (iW / data.length)
-  const yBar = (v: number) => PT + iH - (v / max) * iH
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => ({ v: max * p, y: PT + iH * (1 - p) }))
-
-  const vars = data.map(d => d.var).filter(v => v !== null) as number[]
-  const vMin = vars.length ? Math.min(...vars, -5) : -20
-  const vMax = vars.length ? Math.max(...vars, 5)  : 20
-  const vRng = Math.max(vMax - vMin, 1)
-  const yLn  = (v: number) => PT + iH * (1 - (v - vMin) / vRng)
-
+  const n    = data.length
+  const bW   = Math.max(24, iW / n - 10)
+  const xc   = (i: number) => PL + (i + 0.5) * (iW / n)
+  const max  = Math.max(...data.map(d => d.v), 1)
+  const vars  = data.map(d => d.var).filter(v => v !== null) as number[]
+  const vMin  = vars.length ? Math.min(...vars) - 5 : -20
+  const vMax  = vars.length ? Math.max(...vars) + 5 : 20
+  const vRng  = Math.max(vMax - vMin, 1)
+  const yLn  = (v: number) => LINE_TOP + LINE_H * (1 - (v - vMin) / vRng)
   const pts = data.map((d, i) => d.var !== null ? `${xc(i)},${yLn(d.var!)}` : null).filter(Boolean).join(' ')
-
+  const barTicks = [0, 0.5, 1].map(p => ({ v: max * p, y: BAR_BOT - BAR_H * p }))
+  const fmtV = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
-      {/* Grid */}
-      {ticks.map((t, i) => (
+      <line x1={PL} x2={W - PR} y1={LINE_BOT + 6} y2={LINE_BOT + 6} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="4,4" />
+      {barTicks.map((t, i) => (
         <g key={i}>
-          <line x1={PL} x2={W - PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="3,3" />
-          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">
-            {t.v >= 1000 ? `R$${(t.v / 1000).toFixed(0)}k` : `R$${t.v.toFixed(0)}`}
-          </text>
+          <line x1={PL} x2={W - PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,4" />
+          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">{fmtV(t.v)}</text>
         </g>
       ))}
-      {/* Barras */}
       {data.map((d, i) => {
-        const bh = Math.max((d.v / max) * iH, 1)
+        const bh = Math.max((d.v / max) * BAR_H, 2)
         const bx = xc(i) - bW / 2
-        const by = PT + iH - bh
+        const by = BAR_BOT - bh
         return (
           <g key={i}>
-            <rect x={bx} y={by} width={bW} height={bh} rx={4} fill="#1a4a8a" fillOpacity={0.9} />
-            <text x={xc(i)} y={by - 5} textAnchor="middle" fontSize={8.5} fill="#5599ff" fontWeight="700">
-              {d.v >= 1000 ? `R$${(d.v / 1000).toFixed(1)}k` : `R$${d.v.toFixed(0)}`}
-            </text>
-            <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={10} fill="#9090aa">{d.l}</text>
+            <rect x={bx} y={by} width={bW} height={bh} rx={4} fill="#1a4a8a" fillOpacity={0.92} />
+            <text x={xc(i)} y={by - 5} textAnchor="middle" fontSize={9} fill="#5599ff" fontWeight="700">{fmtV(d.v)}</text>
+            <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={10.5} fill="#9090aa" fontWeight="600">{d.l}</text>
           </g>
         )
       })}
-      {/* Linha variação */}
       {pts && <polyline points={pts} fill="none" stroke="#22c55e" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
-      {/* Pontos + rótulos */}
       {data.map((d, i) => {
         if (d.var === null) return null
         const cy  = yLn(d.var)
@@ -162,17 +155,16 @@ function GraficoMes({ data }: { data: { l: string; v: number; var: number | null
         return (
           <g key={`v${i}`}>
             <circle cx={xc(i)} cy={cy} r={5} fill={cor} stroke="#16161f" strokeWidth={2} />
-            <text x={xc(i)} y={cy - 9} textAnchor="middle" fontSize={9.5} fill={cor} fontWeight="800">
+            <text x={xc(i)} y={cy - 8} textAnchor="middle" fontSize={10} fill={cor} fontWeight="800">
               {d.var >= 0 ? '+' : ''}{d.var.toFixed(1)}%
             </text>
           </g>
         )
       })}
-      {/* Legenda */}
-      <rect x={PL} y={6} width={12} height={10} rx={2} fill="#1a4a8a" fillOpacity={0.9} />
-      <text x={PL + 16} y={15} fontSize={9} fill="#5599ff">Faturamento mensal</text>
-      <circle cx={PL + 140} cy={11} r={4} fill="#22c55e" />
-      <text x={PL + 148} y={15} fontSize={9} fill="#22c55e">% vs mês anterior</text>
+      <rect x={PL} y={LINE_BOT + 16} width={11} height={10} rx={2} fill="#1a4a8a" fillOpacity={0.9} />
+      <text x={PL + 15} y={LINE_BOT + 25} fontSize={9} fill="#5599ff">Faturamento mensal</text>
+      <circle cx={PL + 155} cy={LINE_BOT + 21} r={4} fill="#22c55e" />
+      <text x={PL + 163} y={LINE_BOT + 25} fontSize={9} fill="#22c55e">% variação vs mês anterior</text>
     </svg>
   )
 }
