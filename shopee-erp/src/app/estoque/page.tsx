@@ -18,7 +18,7 @@ const S = {
 }
 
 type Item = { id: string; sku_base: string; produto: string; estoque_atual: number; estoque_minimo: number }
-type MovEntry = { sku_base: string; quantidade: number; tipo: string }
+type MovEntry = { id: string; sku_base: string; quantidade: number; tipo: string; data?: string; observacao?: string }
 
 function Badge({ v, min }: { v: number; min: number }) {
   const empty = v <= 0
@@ -52,6 +52,11 @@ export default function EstoquePage() {
   const [showMov,    setShowMov]    = useState(false)
   const [showDel,    setShowDel]    = useState(false)
   const [limpando,   setLimpando]   = useState(false)
+  const [showHist,   setShowHist]   = useState(false)   // modal histórico
+  const [histEntradas, setHistEntradas] = useState<MovEntry[]>([])
+  const [editMovId,  setEditMovId]  = useState<string | null>(null)
+  const [editMovVals,setEditMovVals]= useState<Partial<MovEntry>>({})
+  const [savingMov,  setSavingMov]  = useState(false)
   const [toast,      setToast]      = useState({ msg: '', type: 'ok' })
   const [newItem,    setNewItem]    = useState({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 })
   const [mov,        setMov]        = useState({ data: new Date().toISOString().slice(0,10), tipo: 'ENTRADA', sku_base: '', quantidade: 0, observacao: '' })
@@ -62,7 +67,7 @@ export default function EstoquePage() {
     setLoading(true)
     const [estRes, movRes, finRes, mapRes] = await Promise.all([
       supabase.from('estoque').select('*').order('produto'),
-      supabase.from('movimentacoes').select('sku_base,quantidade,tipo'),
+      supabase.from('movimentacoes').select('*').order('data', { ascending: false }),
       supabase.from('financeiro').select('sku,quantidade').limit(5000),
       supabase.from('sku_map').select('sku_venda,sku_base,quantidade'),
     ])
@@ -114,6 +119,45 @@ export default function EstoquePage() {
     setShowAdd(false)
     setNewItem({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 })
     load()
+  }
+
+  // Abrir modal de histórico e carregar entradas
+  async function openHistorico() {
+    const { data } = await supabase
+      .from('movimentacoes')
+      .select('*')
+      .eq('tipo', 'ENTRADA')
+      .order('data', { ascending: false })
+    setHistEntradas(data || [])
+    setShowHist(true)
+  }
+
+  // Salvar edição de uma entrada no histórico
+  async function salvarEditMov() {
+    if (!editMovId) return
+    setSavingMov(true)
+    await supabase.from('movimentacoes').update({
+      data:       editMovVals.data,
+      quantidade: editMovVals.quantidade,
+      observacao: editMovVals.observacao,
+    }).eq('id', editMovId)
+    setSavingMov(false)
+    setEditMovId(null)
+    // Atualiza lista do modal e recarrega página
+    const { data } = await supabase.from('movimentacoes').select('*').eq('tipo', 'ENTRADA').order('data', { ascending: false })
+    setHistEntradas(data || [])
+    load()
+    showToast('Entrada atualizada!')
+  }
+
+  // Deletar uma entrada do histórico
+  async function deletarEntrada(id: string) {
+    if (!confirm('Excluir esta entrada? O estoque será recalculado.')) return
+    await supabase.from('movimentacoes').delete().eq('id', id)
+    const { data } = await supabase.from('movimentacoes').select('*').eq('tipo', 'ENTRADA').order('data', { ascending: false })
+    setHistEntradas(data || [])
+    load()
+    showToast('Entrada removida!')
   }
 
   async function doMov() {
@@ -208,6 +252,7 @@ export default function EstoquePage() {
           <p style={{ margin: 0, fontSize: 12, color: '#55556a' }}>{items.length} produtos · {alertas} {alertas === 1 ? 'alerta' : 'alertas'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={openHistorico} style={S.btnSm}>📋 Histórico</button>
           <button onClick={() => setShowMov(true)} style={S.btnSm}>🔄 Entrada de Compra</button>
           <button onClick={() => setShowDel(true)} style={S.btnDanger}>🗑️ Zerar</button>
           <button onClick={() => setShowAdd(true)} style={S.btn}>+ Novo Produto</button>
@@ -415,6 +460,109 @@ export default function EstoquePage() {
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* MODAL HISTÓRICO DE ENTRADAS */}
+      {showHist && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
+          <div style={{ ...S.card, width: '100%', maxWidth: 780, maxHeight: '85vh', display: 'flex', flexDirection: 'column', padding: '24px 28px' }}>
+            {/* Header do modal */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexShrink: 0 }}>
+              <div>
+                <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16, color: '#e8e8f8' }}>📋 Histórico de Entradas</h3>
+                <div style={{ fontSize: 11, color: '#55556a', marginTop: 3 }}>{histEntradas.length} registros · clique em ✏️ para editar</div>
+              </div>
+              <button onClick={() => { setShowHist(false); setEditMovId(null) }}
+                style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 22, lineHeight: 1 }}>✕</button>
+            </div>
+
+            {/* Tabela scrollável */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    {['Data', 'Produto (SKU Base)', 'Quantidade', 'Observação', 'Ações'].map(h => (
+                      <th key={h} style={{ ...S.th, position: 'sticky' as any, top: 0, zIndex: 1 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {histEntradas.length === 0 ? (
+                    <tr><td colSpan={5} style={{ ...S.td, textAlign: 'center', padding: 40, color: '#55556a' }}>
+                      Nenhuma entrada registrada ainda
+                    </td></tr>
+                  ) : histEntradas.map(m => {
+                    const isEdit = editMovId === m.id
+                    const nomeProd = items.find(i => i.sku_base === m.sku_base)?.produto || m.sku_base
+                    return (
+                      <tr key={m.id} style={{ borderBottom: '1px solid #1a1a26', background: isEdit ? '#13131e' : 'transparent' }}>
+                        {/* Data */}
+                        <td style={{ ...S.td, whiteSpace: 'nowrap' as any }}>
+                          {isEdit
+                            ? <input type="date" value={editMovVals.data || ''} onChange={e => setEditMovVals(v => ({ ...v, data: e.target.value }))}
+                                style={{ ...S.inp, width: 140, padding: '4px 8px', fontSize: 12 }} />
+                            : <span style={{ fontFamily: 'monospace', color: '#9090aa' }}>
+                                {m.data ? m.data.slice(8,10)+'/'+m.data.slice(5,7)+'/'+m.data.slice(0,4) : '—'}
+                              </span>
+                          }
+                        </td>
+                        {/* Produto */}
+                        <td style={S.td}>
+                          <div style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11, fontWeight: 700 }}>{m.sku_base}</div>
+                          <div style={{ fontSize: 11, color: '#55556a' }}>{nomeProd}</div>
+                        </td>
+                        {/* Quantidade */}
+                        <td style={{ ...S.td, whiteSpace: 'nowrap' as any }}>
+                          {isEdit
+                            ? <input type="number" min={1} value={editMovVals.quantidade || ''} onChange={e => setEditMovVals(v => ({ ...v, quantidade: +e.target.value }))}
+                                style={{ ...S.inp, width: 90, padding: '4px 8px', fontSize: 12 }} />
+                            : <span style={{ background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                                {N(m.quantidade)} un
+                              </span>
+                          }
+                        </td>
+                        {/* Observação */}
+                        <td style={{ ...S.td, maxWidth: 200 }}>
+                          {isEdit
+                            ? <input value={editMovVals.observacao || ''} onChange={e => setEditMovVals(v => ({ ...v, observacao: e.target.value }))}
+                                placeholder="Observação..." style={{ ...S.inp, padding: '4px 8px', fontSize: 12 }} />
+                            : <span style={{ color: '#55556a', fontSize: 12 }}>{m.observacao || '—'}</span>
+                          }
+                        </td>
+                        {/* Ações */}
+                        <td style={{ ...S.td, textAlign: 'center' as any }}>
+                          <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                            {isEdit ? (
+                              <>
+                                <button onClick={salvarEditMov} disabled={savingMov}
+                                  style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                                  {savingMov ? '...' : '✓ Salvar'}
+                                </button>
+                                <button onClick={() => setEditMovId(null)} style={{ ...S.btnGhost, padding: '5px 10px' }}>✕</button>
+                              </>
+                            ) : (
+                              <>
+                                <button onClick={() => { setEditMovId(m.id); setEditMovVals({ data: m.data, quantidade: m.quantidade, observacao: m.observacao || '' }) }}
+                                  style={{ ...S.btnGhost, padding: '5px 10px', fontSize: 13 }}>✏️</button>
+                                <button onClick={() => deletarEntrada(m.id)}
+                                  style={{ background: '#ef444412', color: '#ef4444', border: '1px solid #ef444425', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div style={{ paddingTop: 14, borderTop: '1px solid #1e1e2c', flexShrink: 0, marginTop: 8 }}>
+              <button onClick={() => { setShowHist(false); setEditMovId(null) }} style={{ ...S.btnGhost }}>Fechar</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
