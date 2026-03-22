@@ -208,16 +208,7 @@ function GraficoMes({ data }: { data: { l: string; v: number; var: number | null
         )
       })}
 
-      {/* Legenda */}
-      <rect x={PL} y={96 + 12} width={11} height={10} rx={2}
-        fill="#1a4a8a" fillOpacity={0.9} />
-      <text x={PL + 15} y={96 + 21} fontSize={9} fill="#5599ff">
-        Faturamento mensal
-      </text>
-      <circle cx={PL + 155} cy={96 + 17} r={4} fill="#22c55e" />
-      <text x={PL + 163} y={96 + 21} fontSize={9} fill="#22c55e">
-        % variação vs mês anterior
-      </text>
+
     </svg>
   )
 }
@@ -315,7 +306,7 @@ function GraficoAdsMes({ data }: { data: { l: string; v: number; var: number | n
       {data.map((d, i) => {
         if (d.var === null) return null
         const cy  = yLn(d.var)
-        const cor = d.var >= 0 ? '#f59e0b' : '#22c55e'
+        const cor = d.var >= 0 ? '#22c55e' : '#ef4444'
         const lblY = cy - LINE_TOP > 16 ? cy - 8 : cy + 17
         return (
           <g key={`v${i}`}>
@@ -326,10 +317,7 @@ function GraficoAdsMes({ data }: { data: { l: string; v: number; var: number | n
           </g>
         )
       })}
-      <rect x={PL} y={96+12} width={11} height={10} rx={2} fill="#7c3aed" fillOpacity={0.85}/>
-      <text x={PL+15} y={96+21} fontSize={9} fill="#a78bfa">Gasto Ads mensal</text>
-      <circle cx={PL+145} cy={96+17} r={4} fill="#f59e0b"/>
-      <text x={PL+153} y={96+21} fontSize={9} fill="#f59e0b">% variação vs mês anterior</text>
+
     </svg>
   )
 }
@@ -400,12 +388,7 @@ function GraficoFatVsAds({ data }: { data: { l: string; fat: number; ads: number
           </g>
         )
       })}
-      <rect x={PL} y={96+12} width={11} height={10} rx={2} fill="#1a4a8a" fillOpacity={0.9}/>
-      <text x={PL+15} y={96+21} fontSize={9} fill="#5599ff">Faturamento</text>
-      <rect x={PL+100} y={96+12} width={11} height={10} rx={2} fill="#7c3aed" fillOpacity={0.85}/>
-      <text x={PL+115} y={96+21} fontSize={9} fill="#a78bfa">Gasto Ads</text>
-      <circle cx={PL+200} cy={96+17} r={4} fill="#22c55e"/>
-      <text x={PL+208} y={96+21} fontSize={9} fill="#22c55e">ROAS mensal</text>
+
     </svg>
   )
 }
@@ -693,9 +676,21 @@ export default function DashboardPage() {
 
       {/* GRÁFICO FATURAMENTO POR MÊS + LINHA % VARIAÇÃO */}
       <div style={{ ...S.card, marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>📆 Faturamento por Mês</div>
-          <div style={{ fontSize: 10, color: '#44445a' }}>Histórico completo · independente do filtro de período</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>📆 Faturamento por Mês</div>
+            <div style={{ fontSize: 10, color: '#44445a' }}>Histórico completo · independente do filtro de período</div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 11, height: 11, borderRadius: 2, background: '#1a4a8a' }} />
+              <span style={{ fontSize: 11, color: '#5599ff' }}>Faturamento mensal</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }} />
+              <span style={{ fontSize: 11, color: '#22c55e' }}>% variação vs mês anterior</span>
+            </div>
+          </div>
         </div>
         <GraficoMes data={mesChart} />
       </div>
@@ -844,18 +839,46 @@ export default function DashboardPage() {
 
       {/* GRÁFICO ADS POR MÊS */}
       <div style={{ ...S.card, marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>📣 Gasto em Ads por Mês</div>
-          <div style={{ fontSize: 10, color: '#44445a' }}>Histórico completo · linha mostra % variação vs mês anterior</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>📣 Gasto em Ads por Mês</div>
+            <div style={{ fontSize: 10, color: '#44445a' }}>Histórico completo · independente do filtro de período</div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 11, height: 11, borderRadius: 2, background: '#7c3aed' }} />
+              <span style={{ fontSize: 11, color: '#a78bfa' }}>Gasto Ads mensal</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b' }} />
+              <span style={{ fontSize: 11, color: '#f59e0b' }}>% variação vs mês anterior</span>
+            </div>
+          </div>
         </div>
         <GraficoAdsMes data={adsChart} />
       </div>
 
       {/* FATURAMENTO VS ADS POR MÊS */}
       <div style={{ ...S.card, marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>⚖️ Faturamento vs Gasto Ads por Mês</div>
-          <div style={{ fontSize: 10, color: '#44445a' }}>Azul = Faturamento · Roxo = Ads · Linha = ROAS (≥2x ideal)</div>
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>⚖️ Faturamento vs Gasto Ads por Mês</div>
+            <div style={{ fontSize: 10, color: '#44445a' }}>ROAS ≥ 2x = eficiente</div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 11, height: 11, borderRadius: 2, background: '#1a4a8a' }} />
+              <span style={{ fontSize: 11, color: '#5599ff' }}>Faturamento</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 11, height: 11, borderRadius: 2, background: '#7c3aed' }} />
+              <span style={{ fontSize: 11, color: '#a78bfa' }}>Gasto Ads</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }} />
+              <span style={{ fontSize: 11, color: '#22c55e' }}>ROAS mensal</span>
+            </div>
+          </div>
         </div>
         <GraficoFatVsAds data={fatVsAds} />
       </div>
