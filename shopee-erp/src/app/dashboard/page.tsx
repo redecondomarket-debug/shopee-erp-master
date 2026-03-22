@@ -65,7 +65,7 @@ function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]
 // ── Gráfico barras por dia ────────────────────────────────────────────────────
 function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>
-  const W = 760, H = 230, PL = 56, PR = 10, PT = 30, PB = 44
+  const W = 900, H = 230, PL = 56, PR = 10, PT = 30, PB = 44
   const max   = Math.max(...data.map(d => d.v), 1)
   const iW    = W - PL - PR
   const iH    = H - PT - PB
