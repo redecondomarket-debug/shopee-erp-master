@@ -65,14 +65,24 @@ function Table({ headers, rows, emptyMsg = 'Nenhum dado.' }: { headers: string[]
 // ── Gráfico barras por dia ────────────────────────────────────────────────────
 function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados no período</div>
-  const W = 760, H = 210, PL = 56, PR = 10, PT = 28, PB = 38
+  const W = 760, H = 230, PL = 56, PR = 10, PT = 30, PB = 44
   const max   = Math.max(...data.map(d => d.v), 1)
   const iW    = W - PL - PR
   const iH    = H - PT - PB
-  const bW    = Math.max(4, Math.min(28, iW / data.length - 3))
-  const xc    = (i: number) => PL + (i + 0.5) * (iW / data.length)
+  const n     = data.length
+
+  // Largura da barra com espaço mínimo garantido entre elas
+  // Espaço entre barras = 40% do slot; barra = 60%
+  const slotW = iW / n
+  const bW    = Math.max(4, Math.min(26, slotW * 0.60))
+
+  const xc    = (i: number) => PL + (i + 0.5) * slotW
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => ({ v: max * p, y: PT + iH * (1 - p) }))
   const fmtV  = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
+
+  // Com muitos dias: alternar rótulos (par/ímpar) para evitar sobreposição
+  const mostrarLabel = (i: number) => n <= 20 || i % 2 === 0
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
       {ticks.map((t, i) => (
@@ -85,18 +95,22 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
         const bh = Math.max((d.v / max) * iH, 1)
         const bx = xc(i) - bW / 2
         const by = PT + iH - bh
+        // Rótulo do valor: só mostra se a barra tiver largura suficiente
+        const showVal = bW >= 8
         return (
           <g key={i}>
-            <rect x={bx} y={by} width={bW} height={bh} rx={3} fill="#ff6600" fillOpacity={0.88} />
-            {bW > 10 && (
-              <text x={xc(i)} y={by - 4} textAnchor="middle" fontSize={7.5} fill="#ff9933" fontWeight="700">
+            <rect x={bx} y={by} width={bW} height={bh} rx={2} fill="#ff6600" fillOpacity={0.88} />
+            {showVal && (
+              <text x={xc(i)} y={by - 4} textAnchor="middle" fontSize={7} fill="#ff9933" fontWeight="700">
                 {fmtV(d.v)}
               </text>
             )}
-            <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={8.5} fill="#44445a"
-              transform={data.length > 20 ? `rotate(-40,${xc(i)},${H - PB + 14})` : ''}>
-              {d.l}
-            </text>
+            {mostrarLabel(i) && (
+              <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={8} fill="#44445a"
+                transform={n > 25 ? `rotate(-45,${xc(i)},${H - PB + 14})` : ''}>
+                {d.l}
+              </text>
+            )}
           </g>
         )
       })}
@@ -654,6 +668,12 @@ export default function DashboardPage() {
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ ...S.inp, width: 150, padding: '5px 8px', fontSize: 12 } as any} />
           <span style={{ color: '#555', fontSize: 12 }}>até</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150, padding: '5px 8px', fontSize: 12 } as any} />
+          {(dateFrom || dateTo) && (
+            <button onClick={() => { setDateFrom(''); setDateTo('') }}
+              style={{ background: '#ef444418', color: '#ef4444', border: '1px solid #ef444430', borderRadius: 7, padding: '6px 12px', cursor: 'pointer', fontSize: 11, fontWeight: 600 }}>
+              ✕ Limpar
+            </button>
+          )}
         </>}
         <button onClick={loadData} style={{ ...S.btnSm, marginLeft: 'auto' } as any}>🔄 Atualizar</button>
       </div>
