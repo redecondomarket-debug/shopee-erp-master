@@ -128,9 +128,10 @@ export default function AnaliseAdsPage() {
     const cEmb = 0 // embalagem já inclusa em calcCustoProd via estoque
     // FIX: imposto do hook
     const imp   = rec * imposto
-    const lucOp = rec - taxas - cProd - cEmb - imp
     const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.gasto || a.investimento || 0), 0)
-    const ll    = lucOp - gads
+    // MC inclui imposto e ads
+    const lucOp = rec - taxas - cProd - cEmb - imp - gads
+    const ll    = lucOp
     return { loja, rec, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, margem: rec > 0 ? ll / rec : 0 }
   }), [finF, adsF, imposto, skuMapData, estoque, lojaFiltro])
 
