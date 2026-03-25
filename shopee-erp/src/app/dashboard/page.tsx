@@ -478,12 +478,14 @@ export default function DashboardPage() {
   const totalRec   = finF.reduce((s, f) => s + (f.valor_bruto || 0), 0)
   const totalTaxas = finF.reduce((s, f) => s + ((f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE), 0)
   const totalCprod = finF.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
-  const totalMC    = totalRec - totalTaxas - totalCprod
-  const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
   const totalImp   = totalRec * imposto
-  const totalLucOp = totalMC - totalImp
   const totalAds   = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
-  const lucroLiq   = totalLucOp - totalAds
+  // MC inclui imposto e ads como custos variáveis
+  const totalMC    = totalRec - totalTaxas - totalCprod - totalImp - totalAds
+  const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
+  // Lucro Op e Lucro Líq = MC (já inclui tudo)
+  const totalLucOp = totalMC
+  const lucroLiq   = totalMC
   const margemLiq  = totalRec > 0 ? lucroLiq / totalRec : 0
   const roas       = totalAds > 0 ? totalRec / totalAds : 0
   const pedSet     = new Set(finF.map(f => f.pedido)).size
@@ -495,11 +497,11 @@ export default function DashboardPage() {
     const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
     const taxas = lp.reduce((s, f) => s + ((f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE), 0)
     const cprod = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
-    const mc    = rec - taxas - cprod
     const imp   = rec * imposto
-    const lucOp = mc - imp
     const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.investimento || 0), 0)
-    const ll    = lucOp - gads
+    const mc    = rec - taxas - cprod - imp - gads
+    const lucOp = mc
+    const ll    = mc
     return { loja, rec, mc, mcPct: rec > 0 ? mc / rec : 0, lucOp, gads, ll, roas: gads > 0 ? rec / gads : 0, peds: new Set(lp.map(f => f.pedido)).size }
   })
 
@@ -681,7 +683,7 @@ export default function DashboardPage() {
       {/* KPIs */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <KPI icon="💰" label="Faturamento Total"      value={R(totalRec)}                    color="#ff9933" sub={`${N(pedSet)} pedidos · Ticket: ${R(ticket)}`} />
-        <KPI icon="📊" label="Margem de Contribuição" value={`${R(totalMC)} · ${P(mcPct)}`}  color={mcPct>=0.30?'#a78bfa':mcPct>=0.15?'#f59e0b':'#ef4444'} sub="Receita − Custos Variáveis" />
+        <KPI icon="📊" label="Margem de Contribuição" value={`${R(totalMC)} · ${P(mcPct)}`}  color={mcPct>=0.30?'#a78bfa':mcPct>=0.15?'#f59e0b':'#ef4444'} sub="Receita − Taxas − Custo − Imp − Ads" />
         <KPI icon="✅" label="Lucro Líquido Real"     value={R(lucroLiq)}                    color={lucroLiq>=0?'#22c55e':'#ef4444'} sub={`Op: ${R(totalLucOp)} · Ads: ${R(totalAds)}`} />
         <KPI icon="📈" label="Margem Líquida"         value={P(margemLiq)}                   color={margemLiq>.15?'#22c55e':margemLiq>.05?'#f59e0b':'#ef4444'} sub="sobre receita bruta" />
         <KPI icon="⚡" label="ROAS Geral"             value={`${roas.toFixed(2)}x`}          color={roas>=2?'#22c55e':roas>=1?'#f59e0b':'#ef4444'} sub={roas>=2?'Eficiente':roas>=1?'Atenção':'Abaixo do ideal'} />
@@ -830,14 +832,13 @@ export default function DashboardPage() {
         <div style={S.card}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, color: '#c0c0d8' }}>💹 Demonstrativo Resumido (DRE)</div>
           {[
-            { label: '(+) Receita Bruta',         v: totalRec,    cor: '#ff9933', bold: false },
-            { label: '(-) Taxas Shopee',           v: -totalTaxas, cor: '#f59e0b', bold: false },
-            { label: '(-) Custo Produtos',         v: -totalCprod, cor: '#888',    bold: false },
-            { label: '(=) Margem de Contribuição', v: totalMC,     cor: '#a78bfa', bold: true  },
-            { label: '(-) Impostos',               v: -totalImp,   cor: '#666',    bold: false },
-            { label: '(=) Lucro Operacional',      v: totalLucOp,  cor: '#0ea5e9', bold: true  },
-            { label: '(-) Gasto Ads',              v: -totalAds,   cor: '#e67e22', bold: false },
-            { label: '(=) Lucro Líquido Real',     v: lucroLiq,    cor: lucroLiq>=0?'#22c55e':'#ef4444', bold: true },
+            { label: '(+) Receita Bruta',         v: totalRec,                        cor: '#ff9933', bold: false },
+            { label: '(-) Taxas Shopee',           v: -totalTaxas,                     cor: '#f59e0b', bold: false },
+            { label: '(-) Custo Produtos',         v: -totalCprod,                     cor: '#888',    bold: false },
+            { label: '(-) Impostos',               v: -totalImp,                       cor: '#666',    bold: false },
+            { label: '(-) Gasto Ads',              v: -totalAds,                       cor: '#e67e22', bold: false },
+            { label: '(=) Margem de Contribuição', v: totalMC,                         cor: '#a78bfa', bold: true  },
+            { label: '(=) Lucro Líquido Real',     v: lucroLiq,                        cor: lucroLiq>=0?'#22c55e':'#ef4444', bold: true },
           ].map((row, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 0', borderBottom: '1px solid #1a1a26' }}>
               <span style={{ fontSize: 12, color: row.bold ? '#c0c0d8' : '#55556a', fontWeight: row.bold ? 700 : 400 }}>{row.label}</span>
