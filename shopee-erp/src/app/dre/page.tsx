@@ -123,18 +123,18 @@ export default function DREPage() {
         const calc = calcCustoProd(sku, f.quantidade || 1)
         return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
       }, 0)
-      const cemb = 0 // embalagem já inclusa em calcCustoProd via estoque
-      // FIX: imposto do hook
+      const cemb = 0
       const imp   = rec * imposto
-      const lucOp = rec - taxas - cprod - cemb - imp
       const gads  = (modo === 'resumido'
         ? adsF.filter(a => a.data === data)
         : adsF.filter(a => a.data === data && a.loja === loja)
       ).reduce((s, a) => s + (a.investimento || 0), 0)
-      const ll    = lucOp - gads
-      const peds  = new Set(lp.map(f => f.pedido)).size
-      const mc    = rec - taxas - cprod - cemb
+      // MC inclui imposto e ads
+      const mc    = rec - taxas - cprod - cemb - imp - gads
       const mcPct = rec > 0 ? mc / rec : 0
+      const lucOp = mc
+      const ll    = mc
+      const peds  = new Set(lp.map(f => f.pedido)).size
 
       const porLoja = LOJAS.map(l => {
         const lf  = finF.filter(f => f.data === data && f.loja === l)
@@ -152,10 +152,10 @@ export default function DREPage() {
           return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
         }, 0)
         const ce2 = 0 // embalagem já inclusa em calcCustoProd via estoque
-        const mc2 = r2 - t2 - cp2 - ce2
-        const lo2 = mc2 - i2
         const g2  = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.investimento || 0), 0)
-        return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: lo2 - g2, peds: new Set(lf.map(f => f.pedido)).size }
+        const mc2 = r2 - t2 - cp2 - ce2 - i2 - g2
+        const lo2 = mc2
+        return { loja: l, rec: r2, taxas: t2, imp: i2, mc: mc2, mcPct: r2 > 0 ? mc2 / r2 : 0, lucOp: lo2, gads: g2, ll: mc2, peds: new Set(lf.map(f => f.pedido)).size }
       })
 
       return { data, loja, rec, taxas, cprod, cemb, imp, mc, mcPct, lucOp, gads, ll, peds, margem: rec > 0 ? ll / rec : 0, porLoja }
@@ -166,7 +166,7 @@ export default function DREPage() {
     const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
     rows.forEach(r => Object.keys(t).forEach(k => (t as any)[k] += (r as any)[k] || 0))
     const totalGadsReal = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
-    const totalLLReal   = t.lucOp - totalGadsReal
+    const totalLLReal   = t.ll
     return { ...t, gads: totalGadsReal, ll: totalLLReal, mcPct: t.rec > 0 ? t.mc / t.rec : 0 }
   }, [rows, adsF])
 
