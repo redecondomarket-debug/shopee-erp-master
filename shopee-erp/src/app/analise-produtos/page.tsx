@@ -148,6 +148,7 @@ export default function AnaliseProdutosPage() {
 
       const cEmb  = 0
       const imp   = rec * imposto
+      // lucro = MC inclui imposto (ads rateado é deduzido depois no adsRateado)
       const lucro = rec - taxas - cProd - cEmb - imp
 
       map[sku].rec    += rec
