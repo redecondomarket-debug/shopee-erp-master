@@ -17,14 +17,14 @@ const TABS = [
   { href: '/composicao',       icon: '🧩', label: 'Composição'       },
   { href: '/produtos-base',    icon: '🗂️', label: 'Produtos Base'    },
   { href: '/compras',          icon: '🛒', label: 'Ordem de Compra'  },
-  { href: '/relatorios',       icon: '📋', label: 'Relatórios'       },
+  { href: '/resultado',        icon: '💹', label: 'Resultado'        },
 ]
 
 const GROUPS = [
   { label: 'Visão Geral', items: TABS.slice(0, 3)  },
   { label: 'Operações',   items: TABS.slice(3, 6)  },
   { label: 'Análises',    items: TABS.slice(6, 10) },
-  { label: 'Gestão',      items: TABS.slice(10, 13) },
+  { label: 'Gestão',      items: TABS.slice(10, 14) },
 ]
 
 export default function Sidebar() {
