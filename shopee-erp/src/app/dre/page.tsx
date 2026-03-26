@@ -165,9 +165,11 @@ export default function DREPage() {
   const tot = useMemo(() => {
     const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
     rows.forEach(r => Object.keys(t).forEach(k => (t as any)[k] += (r as any)[k] || 0))
-    const totalGadsReal = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
-    const totalLLReal   = t.ll
-    return { ...t, gads: totalGadsReal, ll: totalLLReal, mcPct: t.rec > 0 ? t.mc / t.rec : 0 }
+    // Recalcular MC e LL usando total real de ads do período
+    // Evita distorção quando ads não são lançados em todos os dias de venda
+    const totalGads = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
+    const mcReal    = t.rec - t.taxas - t.cprod - t.cemb - t.imp - totalGads
+    return { ...t, gads: totalGads, mc: mcReal, lucOp: mcReal, ll: mcReal, mcPct: t.rec > 0 ? mcReal / t.rec : 0 }
   }, [rows, adsF])
 
   if (loading) return (
@@ -319,3 +321,4 @@ export default function DREPage() {
     </div>
   )
 }
+
