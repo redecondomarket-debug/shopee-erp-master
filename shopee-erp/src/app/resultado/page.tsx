@@ -132,30 +132,30 @@ function SecaoDRE({ titulo, cor, itens, total, totalRec, totalSecao, mesAnterior
 
       {open && itensFiltrados.map((item, i) => {
         const pctRec   = totalRec > 0 ? item.v / totalRec : 0
-        const pctSec   = totalSecao && totalSecao > 0 ? item.v / totalSecao : 0
         const pctBarra = item.v / maxItem
         const varItem  = item.vAnt != null && item.vAnt > 0 ? ((item.v - item.vAnt) / item.vAnt) * 100 : null
         return (
-          <div key={i} style={{ padding: '8px 16px 8px 24px', borderBottom: '1px solid #1a1a26' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-              <span style={{ fontSize: 12, color: '#9090aa' }}>{item.label}</span>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div key={i} style={{ padding: '7px 16px 7px 24px', borderBottom: '1px solid #1a1a26' }}>
+            {/* Linha: nome | variação | valor */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <span style={{ fontSize: 12, color: '#9090aa', flex: 1 }}>{item.label}</span>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 {varItem !== null && (
                   <span style={{ fontSize: 10, fontWeight: 600, color: varItem <= 0 ? '#22c55e' : '#ef4444' }}>
-                    {varItem > 0 ? '▲' : '▼'} {Math.abs(varItem).toFixed(1)}%
+                    {varItem > 0 ? '▲' : '▼'} {Math.abs(varItem).toFixed(0)}% vs ant.
                   </span>
-                )}
-                {totalSecao && totalSecao > 0 && (
-                  <span style={{ fontSize: 10, color: '#55556a', background: '#1a1a26', borderRadius: 3, padding: '1px 5px' }}>{Pf(pctSec)} seção</span>
-                )}
-                {totalRec > 0 && (
-                  <span style={{ fontSize: 10, color: '#44445a' }}>{Pf(pctRec)} receita</span>
                 )}
                 <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e2f0', minWidth: 85, textAlign: 'right' as any }}>{R(item.v)}</span>
               </div>
             </div>
-            <div style={{ height: 3, background: '#1a1a26', borderRadius: 2 }}>
-              <div style={{ height: '100%', width: `${pctBarra * 100}%`, background: cor, borderRadius: 2, opacity: 0.65, transition: 'width .4s' }} />
+            {/* Barra com % da receita dentro */}
+            <div style={{ height: 14, background: '#1a1a26', borderRadius: 3, position: 'relative' as any, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${pctBarra * 100}%`, background: cor, borderRadius: 3, opacity: 0.5, transition: 'width .4s' }} />
+              {totalRec > 0 && (
+                <span style={{ position: 'absolute' as any, right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: '#9090aa', fontFamily: 'monospace' }}>
+                  {Pf(pctRec)} da receita
+                </span>
+              )}
             </div>
           </div>
         )
@@ -507,6 +507,45 @@ export default function ResultadoPage() {
               </div>
             )
           })}
+
+          {/* PONTO DE EQUILÍBRIO */}
+          {(() => {
+            // PE = Custos Fixos / (1 - CustoVar/Receita)
+            // Margem de contribuição unitária = (Rec - CustoVar) / Rec
+            const mcUnitaria = totalRecOp > 0 ? (totalRecOp - totalCusVar) / totalRecOp : 0
+            const pe = mcUnitaria > 0 ? custoFixo / mcUnitaria : 0
+            const distPct = pe > 0 && totalRecOp > 0 ? ((totalRecOp - pe) / pe) * 100 : null
+            const acimaPE = distPct !== null && distPct >= 0
+            return pe > 0 ? (
+              <div style={{ ...S.card, padding: '14px 16px', border: `1px solid ${acimaPE ? '#22c55e33' : '#ef444433'}` }}>
+                <div style={{ fontSize: 10, color: '#55556a', fontWeight: 600, textTransform: 'uppercase' as any, letterSpacing: 0.8, marginBottom: 8 }}>⚖️ Ponto de Equilíbrio</div>
+                <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#e2e2f0', fontSize: 16, marginBottom: 6 }}>{R(pe)}</div>
+                {/* Barra visual PE vs Receita atual */}
+                <div style={{ height: 8, background: '#1a1a26', borderRadius: 4, marginBottom: 6, position: 'relative' as any }}>
+                  <div style={{ position: 'absolute' as any, height: '100%', width: `${Math.min((pe / Math.max(totalRecOp, pe)) * 100, 100)}%`, background: '#ef4444', borderRadius: 4, opacity: 0.5 }} />
+                  {totalRecOp > 0 && (
+                    <div style={{ position: 'absolute' as any, height: '100%', width: `${Math.min((totalRecOp / Math.max(totalRecOp, pe)) * 100, 100)}%`, background: acimaPE ? '#22c55e' : '#ef4444', borderRadius: 4, opacity: 0.35 }} />
+                  )}
+                  {/* Marcador do PE */}
+                  <div style={{ position: 'absolute' as any, left: `${Math.min((pe / Math.max(totalRecOp, pe)) * 100, 100)}%`, top: -2, width: 2, height: 12, background: '#ef4444', borderRadius: 1 }} />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: '#55556a' }}>Receita atual</div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e2f0', fontWeight: 700 }}>{R(totalRecOp)}</div>
+                  </div>
+                  {distPct !== null && (
+                    <div style={{ textAlign: 'right' as any }}>
+                      <div style={{ fontSize: 11, fontWeight: 800, color: acimaPE ? '#22c55e' : '#ef4444' }}>
+                        {acimaPE ? '▲' : '▼'} {Math.abs(distPct).toFixed(1)}%
+                      </div>
+                      <div style={{ fontSize: 9, color: '#44445a' }}>{acimaPE ? 'acima do PE' : 'abaixo do PE'}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null
+          })()}
 
           <div style={{ ...S.card, minHeight: 200 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#c0c0d8', marginBottom: 12 }}>🔴 Distribuição Custos Fixos</div>
