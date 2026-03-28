@@ -136,17 +136,10 @@ function SecaoDRE({ titulo, cor, itens, total, totalRec, totalSecao, mesAnterior
         const varItem  = item.vAnt != null && item.vAnt > 0 ? ((item.v - item.vAnt) / item.vAnt) * 100 : null
         return (
           <div key={i} style={{ padding: '7px 16px 7px 24px', borderBottom: '1px solid #1a1a26' }}>
-            {/* Linha: nome | variação | valor */}
+            {/* Linha: nome | valor */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <span style={{ fontSize: 12, color: '#9090aa', flex: 1 }}>{item.label}</span>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                {varItem !== null && (
-                  <span style={{ fontSize: 10, fontWeight: 600, color: varItem <= 0 ? '#22c55e' : '#ef4444' }}>
-                    {varItem > 0 ? '▲' : '▼'} {Math.abs(varItem).toFixed(0)}% vs ant.
-                  </span>
-                )}
-                <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e2f0', minWidth: 85, textAlign: 'right' as any }}>{R(item.v)}</span>
-              </div>
+              <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e2f0', minWidth: 85, textAlign: 'right' as any }}>{R(item.v)}</span>
             </div>
             {/* Barra com % da receita dentro */}
             <div style={{ height: 14, background: '#1a1a26', borderRadius: 3, position: 'relative' as any, overflow: 'hidden' }}>
@@ -510,41 +503,53 @@ export default function ResultadoPage() {
 
           {/* PONTO DE EQUILÍBRIO */}
           {(() => {
-            // PE = Custos Fixos / (1 - CustoVar/Receita)
-            // Margem de contribuição unitária = (Rec - CustoVar) / Rec
             const mcUnitaria = totalRecOp > 0 ? (totalRecOp - totalCusVar) / totalRecOp : 0
-            const pe = mcUnitaria > 0 ? custoFixo / mcUnitaria : 0
-            const distPct = pe > 0 && totalRecOp > 0 ? ((totalRecOp - pe) / pe) * 100 : null
-            const acimaPE = distPct !== null && distPct >= 0
-            return pe > 0 ? (
-              <div style={{ ...S.card, padding: '14px 16px', border: `1px solid ${acimaPE ? '#22c55e33' : '#ef444433'}` }}>
-                <div style={{ fontSize: 10, color: '#55556a', fontWeight: 600, textTransform: 'uppercase' as any, letterSpacing: 0.8, marginBottom: 8 }}>⚖️ Ponto de Equilíbrio</div>
-                <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#e2e2f0', fontSize: 16, marginBottom: 6 }}>{R(pe)}</div>
-                {/* Barra visual PE vs Receita atual */}
-                <div style={{ height: 8, background: '#1a1a26', borderRadius: 4, marginBottom: 6, position: 'relative' as any }}>
-                  <div style={{ position: 'absolute' as any, height: '100%', width: `${Math.min((pe / Math.max(totalRecOp, pe)) * 100, 100)}%`, background: '#ef4444', borderRadius: 4, opacity: 0.5 }} />
-                  {totalRecOp > 0 && (
-                    <div style={{ position: 'absolute' as any, height: '100%', width: `${Math.min((totalRecOp / Math.max(totalRecOp, pe)) * 100, 100)}%`, background: acimaPE ? '#22c55e' : '#ef4444', borderRadius: 4, opacity: 0.35 }} />
-                  )}
-                  {/* Marcador do PE */}
-                  <div style={{ position: 'absolute' as any, left: `${Math.min((pe / Math.max(totalRecOp, pe)) * 100, 100)}%`, top: -2, width: 2, height: 12, background: '#ef4444', borderRadius: 1 }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: '#55556a' }}>Receita atual</div>
-                    <div style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e2f0', fontWeight: 700 }}>{R(totalRecOp)}</div>
+            const pe = mcUnitaria > 0 && custoFixo > 0 ? custoFixo / mcUnitaria : 0
+            if (pe <= 0) return null
+            const distancia  = totalRecOp - pe
+            const distPct    = (distancia / pe) * 100
+            const acima      = distancia >= 0
+            const maxBar     = Math.max(totalRecOp, pe)
+            const pctPE      = (pe / maxBar) * 100
+            const pctRec     = (totalRecOp / maxBar) * 100
+            return (
+              <div style={{ ...S.card, padding: '16px', border: `1px solid ${acima ? '#22c55e33' : '#ef444433'}` }}>
+                <div style={{ fontSize: 10, color: '#55556a', fontWeight: 700, textTransform: 'uppercase' as any, letterSpacing: 0.8, marginBottom: 12 }}>⚖️ Ponto de Equilíbrio</div>
+
+                {/* PE e Receita atual lado a lado */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                  <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
+                    <div style={{ fontSize: 9, color: '#55556a', marginBottom: 4, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Precisa faturar</div>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#e2e2f0', fontSize: 14 }}>{R(pe)}</div>
+                    <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>para empatar</div>
                   </div>
-                  {distPct !== null && (
-                    <div style={{ textAlign: 'right' as any }}>
-                      <div style={{ fontSize: 11, fontWeight: 800, color: acimaPE ? '#22c55e' : '#ef4444' }}>
-                        {acimaPE ? '▲' : '▼'} {Math.abs(distPct).toFixed(1)}%
-                      </div>
-                      <div style={{ fontSize: 9, color: '#44445a' }}>{acimaPE ? 'acima do PE' : 'abaixo do PE'}</div>
+                  <div style={{ background: acima ? '#22c55e14' : '#ef444414', borderRadius: 8, padding: '10px 12px', border: `1px solid ${acima ? '#22c55e33' : '#ef444433'}` }}>
+                    <div style={{ fontSize: 9, color: '#55556a', marginBottom: 4, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Está faturando</div>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 800, color: acima ? '#22c55e' : '#ef4444', fontSize: 14 }}>{R(totalRecOp)}</div>
+                    <div style={{ fontSize: 9, color: acima ? '#22c55e' : '#ef4444', marginTop: 2, fontWeight: 700 }}>
+                      {acima ? '▲' : '▼'} {Math.abs(distPct).toFixed(1)}% {acima ? 'acima' : 'abaixo'}
                     </div>
-                  )}
+                  </div>
+                </div>
+
+                {/* Barra comparativa */}
+                <div style={{ position: 'relative' as any, height: 28, background: '#1a1a26', borderRadius: 6, overflow: 'hidden' }}>
+                  {/* Barra da receita atual */}
+                  <div style={{ position: 'absolute' as any, left: 0, top: 0, height: '100%', width: `${pctRec}%`, background: acima ? '#22c55e' : '#ef4444', opacity: 0.25, borderRadius: 6, transition: 'width .5s' }} />
+                  {/* Marcador do PE */}
+                  <div style={{ position: 'absolute' as any, left: `${pctPE}%`, top: 0, width: 2, height: '100%', background: '#ffffff', opacity: 0.6 }} />
+                  {/* Labels dentro da barra */}
+                  <div style={{ position: 'absolute' as any, left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: '#9090aa', fontFamily: 'monospace' }}>PE: {R(pe)}</div>
+                  <div style={{ position: 'absolute' as any, right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: acima ? '#22c55e' : '#ef4444', fontFamily: 'monospace', fontWeight: 700 }}>
+                    {acima ? '▲' : '▼'} {R(Math.abs(distancia))}
+                  </div>
+                </div>
+
+                <div style={{ fontSize: 9, color: '#33334a', marginTop: 8, textAlign: 'center' as any }}>
+                  {acima ? `Você está R$ ${Math.abs(distancia).toFixed(0)} acima do ponto de equilíbrio` : `Faltam R$ ${Math.abs(distancia).toFixed(0)} para atingir o ponto de equilíbrio`}
                 </div>
               </div>
-            ) : null
+            )
           })()}
 
           <div style={{ ...S.card, minHeight: 200 }}>
