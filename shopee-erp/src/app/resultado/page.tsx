@@ -131,7 +131,6 @@ function SecaoDRE({ titulo, cor, itens, total, totalRec, totalSecao, mesAnterior
       </div>
 
       {open && itensFiltrados.map((item, i) => {
-        const pctRec   = totalRec > 0 ? item.v / totalRec : 0
         const pctBarra = item.v / maxItem
         const varItem  = item.vAnt != null && item.vAnt > 0 ? ((item.v - item.vAnt) / item.vAnt) * 100 : null
         return (
@@ -141,14 +140,12 @@ function SecaoDRE({ titulo, cor, itens, total, totalRec, totalSecao, mesAnterior
               <span style={{ fontSize: 12, color: '#9090aa', flex: 1 }}>{item.label}</span>
               <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#e2e2f0', minWidth: 85, textAlign: 'right' as any }}>{R(item.v)}</span>
             </div>
-            {/* Barra com % da receita dentro */}
+            {/* Barra com % dentro do grupo */}
             <div style={{ height: 14, background: '#1a1a26', borderRadius: 3, position: 'relative' as any, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${pctBarra * 100}%`, background: cor, borderRadius: 3, opacity: 0.5, transition: 'width .4s' }} />
-              {totalRec > 0 && (
-                <span style={{ position: 'absolute' as any, right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: '#9090aa', fontFamily: 'monospace' }}>
-                  {Pf(pctRec)} da receita
-                </span>
-              )}
+              <span style={{ position: 'absolute' as any, right: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: '#9090aa', fontFamily: 'monospace' }}>
+                {Pf(pctBarra)} do grupo
+              </span>
             </div>
           </div>
         )
@@ -502,52 +499,63 @@ export default function ResultadoPage() {
           })}
 
           {/* PONTO DE EQUILÍBRIO */}
-          {(() => {
+          {custoFixo > 0 && (() => {
             const mcUnitaria = totalRecOp > 0 ? (totalRecOp - totalCusVar) / totalRecOp : 0
-            const pe = mcUnitaria > 0 && custoFixo > 0 ? custoFixo / mcUnitaria : 0
-            if (pe <= 0) return null
-            const distancia  = totalRecOp - pe
-            const distPct    = (distancia / pe) * 100
-            const acima      = distancia >= 0
-            const maxBar     = Math.max(totalRecOp, pe)
-            const pctPE      = (pe / maxBar) * 100
-            const pctRec     = (totalRecOp / maxBar) * 100
+            const mcNegativa = mcUnitaria <= 0
+            // Se MC negativa, PE não é calculável — custos variáveis já superam a receita
+            const pe = !mcNegativa ? custoFixo / mcUnitaria : 0
+            const distancia = pe > 0 ? totalRecOp - pe : 0
+            const distPct   = pe > 0 ? (distancia / pe) * 100 : 0
+            const acima     = distancia >= 0
+            const maxBar    = Math.max(totalRecOp, pe, 1)
+            const pctPE     = pe > 0 ? Math.min((pe / maxBar) * 100, 100) : 0
+            const pctRec    = Math.min((totalRecOp / maxBar) * 100, 100)
             return (
-              <div style={{ ...S.card, padding: '16px', border: `1px solid ${acima ? '#22c55e33' : '#ef444433'}` }}>
+              <div style={{ ...S.card, padding: '16px', border: `1px solid ${mcNegativa ? '#ef444433' : acima ? '#22c55e33' : '#ef444433'}` }}>
                 <div style={{ fontSize: 10, color: '#55556a', fontWeight: 700, textTransform: 'uppercase' as any, letterSpacing: 0.8, marginBottom: 12 }}>⚖️ Ponto de Equilíbrio</div>
 
-                {/* PE e Receita atual lado a lado */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-                  <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
-                    <div style={{ fontSize: 9, color: '#55556a', marginBottom: 4, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Precisa faturar</div>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#e2e2f0', fontSize: 14 }}>{R(pe)}</div>
-                    <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>para empatar</div>
-                  </div>
-                  <div style={{ background: acima ? '#22c55e14' : '#ef444414', borderRadius: 8, padding: '10px 12px', border: `1px solid ${acima ? '#22c55e33' : '#ef444433'}` }}>
-                    <div style={{ fontSize: 9, color: '#55556a', marginBottom: 4, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Está faturando</div>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 800, color: acima ? '#22c55e' : '#ef4444', fontSize: 14 }}>{R(totalRecOp)}</div>
-                    <div style={{ fontSize: 9, color: acima ? '#22c55e' : '#ef4444', marginTop: 2, fontWeight: 700 }}>
-                      {acima ? '▲' : '▼'} {Math.abs(distPct).toFixed(1)}% {acima ? 'acima' : 'abaixo'}
+                {mcNegativa ? (
+                  /* MC negativa — PE incalculável */
+                  <div style={{ background: '#ef444414', border: '1px solid #ef444433', borderRadius: 8, padding: '12px', textAlign: 'center' as any }}>
+                    <div style={{ fontSize: 13, color: '#ef4444', fontWeight: 700, marginBottom: 6 }}>⚠️ PE incalculável</div>
+                    <div style={{ fontSize: 11, color: '#9090aa', lineHeight: 1.5 }}>
+                      Seus custos variáveis ({R(totalCusVar)}) já superam a receita ({R(totalRecOp)}).
+                      Reduza os custos variáveis para que o PE possa ser calculado.
                     </div>
                   </div>
-                </div>
-
-                {/* Barra comparativa */}
-                <div style={{ position: 'relative' as any, height: 28, background: '#1a1a26', borderRadius: 6, overflow: 'hidden' }}>
-                  {/* Barra da receita atual */}
-                  <div style={{ position: 'absolute' as any, left: 0, top: 0, height: '100%', width: `${pctRec}%`, background: acima ? '#22c55e' : '#ef4444', opacity: 0.25, borderRadius: 6, transition: 'width .5s' }} />
-                  {/* Marcador do PE */}
-                  <div style={{ position: 'absolute' as any, left: `${pctPE}%`, top: 0, width: 2, height: '100%', background: '#ffffff', opacity: 0.6 }} />
-                  {/* Labels dentro da barra */}
-                  <div style={{ position: 'absolute' as any, left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: '#9090aa', fontFamily: 'monospace' }}>PE: {R(pe)}</div>
-                  <div style={{ position: 'absolute' as any, right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: acima ? '#22c55e' : '#ef4444', fontFamily: 'monospace', fontWeight: 700 }}>
-                    {acima ? '▲' : '▼'} {R(Math.abs(distancia))}
-                  </div>
-                </div>
-
-                <div style={{ fontSize: 9, color: '#33334a', marginTop: 8, textAlign: 'center' as any }}>
-                  {acima ? `Você está R$ ${Math.abs(distancia).toFixed(0)} acima do ponto de equilíbrio` : `Faltam R$ ${Math.abs(distancia).toFixed(0)} para atingir o ponto de equilíbrio`}
-                </div>
+                ) : (
+                  <>
+                    {/* PE e Receita atual lado a lado */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                      <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
+                        <div style={{ fontSize: 9, color: '#55556a', marginBottom: 4, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Precisa faturar</div>
+                        <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#e2e2f0', fontSize: 13 }}>{R(pe)}</div>
+                        <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>para empatar</div>
+                      </div>
+                      <div style={{ background: acima ? '#22c55e14' : '#ef444414', borderRadius: 8, padding: '10px 12px', border: `1px solid ${acima ? '#22c55e33' : '#ef444433'}` }}>
+                        <div style={{ fontSize: 9, color: '#55556a', marginBottom: 4, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Está faturando</div>
+                        <div style={{ fontFamily: 'monospace', fontWeight: 800, color: acima ? '#22c55e' : '#ef4444', fontSize: 13 }}>{R(totalRecOp)}</div>
+                        <div style={{ fontSize: 9, color: acima ? '#22c55e' : '#ef4444', marginTop: 2, fontWeight: 700 }}>
+                          {acima ? '▲' : '▼'} {Math.abs(distPct).toFixed(1)}% {acima ? 'acima' : 'abaixo'}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Barra comparativa */}
+                    <div style={{ position: 'relative' as any, height: 28, background: '#1a1a26', borderRadius: 6, overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute' as any, left: 0, top: 0, height: '100%', width: `${pctRec}%`, background: acima ? '#22c55e' : '#ef4444', opacity: 0.25, borderRadius: 6, transition: 'width .5s' }} />
+                      <div style={{ position: 'absolute' as any, left: `${pctPE}%`, top: 0, width: 2, height: '100%', background: '#ffffff', opacity: 0.5 }} />
+                      <div style={{ position: 'absolute' as any, left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: '#9090aa', fontFamily: 'monospace' }}>PE: {R(pe)}</div>
+                      <div style={{ position: 'absolute' as any, right: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 9, color: acima ? '#22c55e' : '#ef4444', fontFamily: 'monospace', fontWeight: 700 }}>
+                        {acima ? '▲' : '▼'} {R(Math.abs(distancia))}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 9, color: '#33334a', marginTop: 8, textAlign: 'center' as any }}>
+                      {acima
+                        ? `Você está R$ ${Math.abs(distancia).toFixed(0)} acima do ponto de equilíbrio`
+                        : `Faltam R$ ${Math.abs(distancia).toFixed(0)} para atingir o ponto de equilíbrio`}
+                    </div>
+                  </>
+                )}
               </div>
             )
           })()}
