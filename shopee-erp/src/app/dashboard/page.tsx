@@ -417,6 +417,9 @@ export default function DashboardPage() {
   const [dateFrom,   setDateFrom]   = useState('')
   const [dateTo,     setDateTo]     = useState('')
   const [periodo,    setPeriodo]    = useState('personalizado')
+  const [periodoGrafDia, setPeriodoGrafDia] = useState('15dias')
+  const [grafDiaFrom,    setGrafDiaFrom]    = useState('')
+  const [grafDiaTo,      setGrafDiaTo]      = useState('')
 
   const { imposto } = useTaxRate()
 
@@ -521,11 +524,34 @@ export default function DashboardPage() {
   const topSkus  = Object.values(skuAgg).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
   const totalQtd = finF.reduce((s, f) => s + (f.quantidade || 1), 0)
 
-  // ── Gráfico por dia ───────────────────────────────────────────────────────
-  const byDay: Record<string, number> = {}
-  finF.forEach(f => { byDay[f.data] = (byDay[f.data] || 0) + (f.valor_bruto || 0) })
-  const dayChart = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b))
-    .map(([d, v]) => ({ l: d.slice(8,10)+'/'+d.slice(5,7), v }))
+  // ── Gráfico por dia — filtro próprio (independente do filtro geral) ─────────
+  const dayChartData = useMemo(() => {
+    const hoje   = new Date()
+    const fmt    = (d: Date) => d.toISOString().slice(0, 10)
+    let from = '', to = ''
+    if (periodoGrafDia === '15dias') {
+      const d = new Date(hoje); d.setDate(d.getDate() - 14)
+      from = fmt(d); to = fmt(hoje)
+    } else if (periodoGrafDia === 'mesAtual') {
+      from = fmt(hoje).slice(0,8) + '01'; to = fmt(hoje)
+    } else if (periodoGrafDia === 'mesAnterior') {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
+      const d2 = new Date(hoje.getFullYear(), hoje.getMonth(), 0)
+      from = fmt(d); to = fmt(d2)
+    } else {
+      from = grafDiaFrom; to = grafDiaTo
+    }
+    const byDay: Record<string, number> = {}
+    financeiro.forEach(f => {
+      if (!f.data) return
+      if (lojaFiltro !== 'Todas' && f.loja !== lojaFiltro) return
+      if (from && f.data < from) return
+      if (to   && f.data > to)   return
+      byDay[f.data] = (byDay[f.data] || 0) + (f.valor_bruto || 0)
+    })
+    return { entries: Object.entries(byDay).sort(([a],[b]) => a.localeCompare(b)).map(([d,v]) => ({ l: d.slice(8,10)+'/'+d.slice(5,7), v })), from, to }
+  }, [financeiro, lojaFiltro, periodoGrafDia, grafDiaFrom, grafDiaTo])
+  const dayChart = dayChartData.entries
 
   // ── Gráfico por mês (histórico completo, sem filtro de data) ──────────────
   const byMes: Record<string, number> = {}
@@ -692,7 +718,25 @@ export default function DashboardPage() {
 
       {/* GRÁFICO FATURAMENTO POR DIA */}
       <div style={{ ...S.card, marginBottom: 20 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: '#c0c0d8' }}>📅 Faturamento por Dia</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#c0c0d8' }}>📅 Faturamento por Dia</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <select value={periodoGrafDia} onChange={e => setPeriodoGrafDia(e.target.value)}
+              style={{ background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 6, padding: '5px 10px', color: '#e2e2f0', fontSize: 11, outline: 'none', cursor: 'pointer' }}>
+              <option value="15dias">Últimos 15 dias</option>
+              <option value="mesAtual">Mês atual</option>
+              <option value="mesAnterior">Mês anterior</option>
+              <option value="personalizado">Personalizado</option>
+            </select>
+            {periodoGrafDia === 'personalizado' && <>
+              <input type="date" value={grafDiaFrom} onChange={e => setGrafDiaFrom(e.target.value)}
+                style={{ background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 6, padding: '5px 8px', color: '#e2e2f0', fontSize: 11, outline: 'none' }} />
+              <span style={{ color: '#555', fontSize: 11 }}>até</span>
+              <input type="date" value={grafDiaTo} onChange={e => setGrafDiaTo(e.target.value)}
+                style={{ background: '#0f0f1a', border: '1px solid #2a2a3a', borderRadius: 6, padding: '5px 8px', color: '#e2e2f0', fontSize: 11, outline: 'none' }} />
+            </>}
+          </div>
+        </div>
         <GraficoDia data={dayChart} />
       </div>
 
