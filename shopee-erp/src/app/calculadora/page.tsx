@@ -77,6 +77,7 @@ export default function CalculadoraPage() {
   const [preco,        setPreco]        = useState('')
   const [taxaShopee,   setTaxaShopee]   = useState('20')
   const [metaLucro,    setMetaLucro]    = useState('15')
+  const [taxaFixa,     setTaxaFixa]     = useState('4')
   const [roasAtual,    setRoasAtual]    = useState('')
   const [gastoAds,     setGastoAds]     = useState('')
   const [vendasGeradas,setVendasGeradas]= useState('')
@@ -121,9 +122,11 @@ export default function CalculadoraPage() {
     const taxa = +taxaShopee  / 100
     const meta = +metaLucro   / 100
     const cp   = custoProduto
+    const tf   = +taxaFixa    || 0   // taxa fixa por venda
     if (p <= 0) return null
 
-    const valorTaxa      = p * taxa
+    const valorTaxaPct   = p * taxa
+    const valorTaxa      = valorTaxaPct + tf  // % + R$ fixo
     const margemSemAds   = p - valorTaxa - cp          // MC antes de ads
     const margemSemAdsPct= margemSemAds / p             // % da receita
 
@@ -173,7 +176,7 @@ export default function CalculadoraPage() {
       roasEmpate, roasIdeal, cpaEmpate, cpaIdeal, meta,
       analiseRoas, analiseCpa,
     }
-  }, [preco, taxaShopee, metaLucro, custoProduto, roasAtual, gastoAds, vendasGeradas])
+  }, [preco, taxaShopee, taxaFixa, metaLucro, custoProduto, roasAtual, gastoAds, vendasGeradas])
 
   if (loading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
@@ -243,11 +246,16 @@ export default function CalculadoraPage() {
           <div style={S.card}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#f59e0b', marginBottom: 14, letterSpacing: 0.5 }}>⚙️ PARÂMETROS</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
               <div>
                 <label style={S.label}>Taxa Shopee (%)</label>
                 <input type="number" step="0.1" min="0" max="100" value={taxaShopee}
                   onChange={e => setTaxaShopee(e.target.value)} style={S.inp as any} />
+              </div>
+              <div>
+                <label style={S.label}>Taxa Fixa (R$)</label>
+                <input type="number" step="0.01" min="0" value={taxaFixa}
+                  onChange={e => setTaxaFixa(e.target.value)} style={S.inp as any} />
               </div>
               <div>
                 <label style={S.label}>Meta de Lucro (%)</label>
@@ -338,7 +346,7 @@ export default function CalculadoraPage() {
             <div style={S.card}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#c0c0d8', marginBottom: 14, letterSpacing: 0.5 }}>💰 DECOMPOSIÇÃO POR VENDA</div>
               <ResultRow label="Preço de Venda" value={R(calc.preco)} />
-              <ResultRow label={`Taxa Shopee (${(calc.taxaPct*100).toFixed(0)}%)`} value={`-${R(calc.taxa)}`} color="#f59e0b" />
+              <ResultRow label={`Taxa Shopee (${(calc.taxaPct*100).toFixed(0)}% + ${R(+taxaFixa||0)} fixo)`} value={`-${R(calc.taxa)}`} color="#f59e0b" />
               <ResultRow label="Custo do Produto" value={`-${R(calc.cp)}`} color="#888" />
               <div style={{ margin: '8px 0' }} />
               <ResultRow label="Margem antes de Ads" value={`${R(calc.margemSemAds)} (${Pf(calc.margemSemAdsPct)})`}
@@ -420,4 +428,3 @@ export default function CalculadoraPage() {
     </div>
   )
 }
-
