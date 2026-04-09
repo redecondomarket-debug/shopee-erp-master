@@ -6,6 +6,19 @@ import { supabase } from '@/lib/supabase'
 type ProdutoBase = { sku_base: string; produto: string; custo: number; custo_embalagem: number }
 type SkuMap      = { sku_venda: string; sku_base: string; quantidade: number }
 
+// Famílias hardcoded
+const SKU_FAMILIA: Record<string, string> = {
+  FM50: 'Formas', FM100: 'Formas', FM200: 'Formas', FM300: 'Formas',
+  KIT2TP: 'Tapetes', KIT3TP: 'Tapetes', KIT4TP: 'Tapetes',
+  KIT120: 'Saquinhos', KIT240: 'Saquinhos', KIT480: 'Saquinhos',
+  KITPS120B: 'Porta-Saquinho', KITPS240B: 'Porta-Saquinho', KITPS480B: 'Porta-Saquinho',
+}
+const FAMILIAS_CAL = ['Formas', 'Tapetes', 'Saquinhos', 'Porta-Saquinho']
+const FAMILIA_CORES_CAL: Record<string, string> = {
+  'Formas': '#f59e0b', 'Tapetes': '#a855f7',
+  'Saquinhos': '#0ea5e9', 'Porta-Saquinho': '#22c55e',
+}
+
 const R  = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 const Pf = (v: number, dec = 1) => `${((+v || 0) * 100).toFixed(dec)}%`
 
@@ -70,10 +83,11 @@ function ResultRow({ label, value, sub, color = '#e2e2f0', highlight = false }: 
 export default function CalculadoraPage() {
   const [estoque,    setEstoque]    = useState<ProdutoBase[]>([])
   const [skuMapData, setSkuMapData] = useState<SkuMap[]>([])
+  const [financeiro, setFinanceiro] = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
+  const [familia,    setFamilia]    = useState('Formas')
 
   // Inputs da calculadora
-  const [skuSel,       setSkuSel]       = useState('')
   const [preco,        setPreco]        = useState('')
   const [taxaShopee,   setTaxaShopee]   = useState('20')
   const [metaLucro,    setMetaLucro]    = useState('15')
@@ -88,32 +102,51 @@ export default function CalculadoraPage() {
     Promise.all([
       supabase.from('estoque').select('sku_base,produto,custo,custo_embalagem'),
       supabase.from('sku_map').select('sku_venda,sku_base,quantidade'),
-    ]).then(([e, s]) => {
+      supabase.from('financeiro').select('sku,quantidade,valor_bruto,data').limit(10000),
+    ]).then(([e, s, f]) => {
       setEstoque(e.data || [])
       setSkuMapData(s.data || [])
+      setFinanceiro(f.data || [])
       setLoading(false)
     })
   }, [])
 
-  // SKUs disponíveis (únicos da sku_map)
-  const skusDisponiveis = useMemo(() => {
-    const set = new Set(skuMapData.map(m => m.sku_venda))
-    return Array.from(set).sort()
-  }, [skuMapData])
+  // Ticket médio do mês anterior por família
+  const ticketMesAnterior = useMemo(() => {
+    const hoje = new Date()
+    const mesAnt = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
+    const mesAntFim = new Date(hoje.getFullYear(), hoje.getMonth(), 0)
+    const fmt = (d: Date) => d.toISOString().slice(0,10)
+    const from = fmt(mesAnt), to = fmt(mesAntFim)
+    const skusDaFamilia = Object.entries(SKU_FAMILIA)
+      .filter(([_, f]) => f === familia).map(([s]) => s)
+    const pedidosFam = financeiro.filter(f => {
+      if (!f.data || f.data < from || f.data > to) return false
+      return skusDaFamilia.includes(String(f.sku || '').toUpperCase())
+    })
+    if (!pedidosFam.length) return { ticketVenda: 0, ticketCusto: 0, pedidos: 0 }
+    const totalRec = pedidosFam.reduce((s, f) => s + (f.valor_bruto || 0), 0)
+    const totalPed = new Set(pedidosFam.map(f => f.pedido)).size || pedidosFam.length
+    // Custo médio: calcular para cada pedido
+    let totalCusto = 0
+    pedidosFam.forEach(f => {
+      const comps = skuMapData.filter(m => m.sku_venda === String(f.sku || '').toUpperCase())
+      const custo = comps.reduce((t, c) => {
+        const prod = estoque.find(e => e.sku_base === c.sku_base)
+        return t + (prod?.custo || 0) * (c.quantidade || 1) * (f.quantidade || 1)
+      }, 0)
+      const principal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
+      totalCusto += custo + (principal?.custo_embalagem || 0)
+    })
+    return {
+      ticketVenda: totalPed > 0 ? totalRec / totalPed : 0,
+      ticketCusto: totalPed > 0 ? totalCusto / totalPed : 0,
+      pedidos: totalPed,
+    }
+  }, [familia, financeiro, skuMapData, estoque])
 
-  // Calcular custo do produto pelo SKU selecionado
-  const custoProdutoAuto = useMemo(() => {
-    if (!skuSel) return 0
-    const comps = skuMapData.filter(m => m.sku_venda === skuSel)
-    if (!comps.length) return 0
-    const custo = comps.reduce((t, c) => {
-      const prod = estoque.find(e => e.sku_base === c.sku_base)
-      return t + (prod?.custo || 0) * (c.quantidade || 1)
-    }, 0)
-    const principal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
-    return custo + (principal?.custo_embalagem || 0)
-  }, [skuSel, skuMapData, estoque])
-
+  // Custo médio da família do mês anterior (para preencher automaticamente)
+  const custoProdutoAuto = ticketMesAnterior.ticketCusto
   const custoProduto = usarCustoManual ? (+custoManual || 0) : custoProdutoAuto
 
   // ── Cálculos principais ───────────────────────────────────────────────────
@@ -203,37 +236,75 @@ export default function CalculadoraPage() {
 
           {/* Produto */}
           <div style={S.card}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#ff6600', marginBottom: 14, letterSpacing: 0.5 }}>📦 PRODUTO</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#ff6600', marginBottom: 14, letterSpacing: 0.5 }}>📦 FAMÍLIA DE PRODUTO</div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={S.label}>SKU (opcional — preenche o custo automaticamente)</label>
-              <select value={skuSel} onChange={e => { setSkuSel(e.target.value); setUsarCustoManual(false) }} style={S.inp as any}>
-                <option value="">Digitar custo manualmente</option>
-                {skusDisponiveis.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
+            {/* Seletor de família */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={S.label}>Família</label>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {FAMILIAS_CAL.map(f => {
+                  const ativo = familia === f
+                  const cor   = FAMILIA_CORES_CAL[f] || '#ff6600'
+                  return (
+                    <button key={f} onClick={() => { setFamilia(f); setUsarCustoManual(false) }} style={{
+                      background: ativo ? cor + '22' : '#0f0f1a',
+                      border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
+                      color: ativo ? cor : '#55556a',
+                      borderRadius: 7, padding: '7px 14px', cursor: 'pointer',
+                      fontSize: 12, fontWeight: ativo ? 700 : 400,
+                    }}>{f}</button>
+                  )
+                })}
+              </div>
             </div>
+
+            {/* Tickets do mês anterior */}
+            {ticketMesAnterior.pedidos > 0 ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 9, color: '#55556a', marginBottom: 3, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Ticket Médio Venda</div>
+                  <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#ff9933', fontSize: 14 }}>{R(ticketMesAnterior.ticketVenda)}</div>
+                  <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>mês anterior · {ticketMesAnterior.pedidos} pedidos</div>
+                </div>
+                <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: 9, color: '#55556a', marginBottom: 3, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Ticket Médio Custo</div>
+                  <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#888', fontSize: 14 }}>{R(ticketMesAnterior.ticketCusto)}</div>
+                  <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>custo médio por pedido</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 11, color: '#44445a', textAlign: 'center' as any }}>
+                Sem dados do mês anterior para {familia}
+              </div>
+            )}
 
             <div style={{ marginBottom: 12 }}>
               <label style={S.label}>Preço de Venda (R$)</label>
-              <input type="number" step="0.01" min="0" value={preco} onChange={e => setPreco(e.target.value)}
-                placeholder="ex: 51,79" style={S.inp as any} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="number" step="0.01" min="0" value={preco} onChange={e => setPreco(e.target.value)}
+                  placeholder="ex: 51,79" style={{ ...S.inp, flex: 1 } as any} />
+                {ticketMesAnterior.pedidos > 0 && (
+                  <button onClick={() => setPreco(ticketMesAnterior.ticketVenda.toFixed(2))}
+                    style={{ background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 7, padding: '6px 10px', cursor: 'pointer', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' as any }}>
+                    Usar mês ant.
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Custo do produto */}
             <div style={{ marginBottom: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                 <label style={{ ...S.label, marginBottom: 0 }}>Custo do Produto (R$)</label>
-                {skuSel && (
-                  <button onClick={() => setUsarCustoManual(!usarCustoManual)}
-                    style={{ background: 'none', border: 'none', color: '#ff6600', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>
-                    {usarCustoManual ? '← Usar automático' : '✏️ Editar'}
-                  </button>
-                )}
+                <button onClick={() => setUsarCustoManual(!usarCustoManual)}
+                  style={{ background: 'none', border: 'none', color: '#ff6600', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>
+                  {usarCustoManual ? '← Usar automático' : '✏️ Editar'}
+                </button>
               </div>
-              {skuSel && !usarCustoManual ? (
+              {!usarCustoManual ? (
                 <div style={{ ...S.inp as any, color: '#9090aa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span>{R(custoProdutoAuto)}</span>
-                  <span style={{ fontSize: 10, color: '#44445a' }}>automático do estoque</span>
+                  <span style={{ fontSize: 10, color: '#44445a' }}>custo médio mês anterior</span>
                 </div>
               ) : (
                 <input type="number" step="0.01" min="0" value={custoManual} onChange={e => setCustoManual(e.target.value)}
