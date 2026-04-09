@@ -5,6 +5,19 @@ import { useTaxRate } from '@/hooks/useTaxRate'
 import * as XLSX from 'xlsx'
 
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
+
+// Famílias de produto (hardcoded)
+const SKU_FAMILIA: Record<string, string> = {
+  FM50: 'Formas', FM100: 'Formas', FM200: 'Formas', FM300: 'Formas',
+  KIT2TP: 'Tapetes', KIT3TP: 'Tapetes', KIT4TP: 'Tapetes',
+  KIT120: 'Saquinhos', KIT240: 'Saquinhos', KIT480: 'Saquinhos',
+  KITPS120B: 'Porta-Saquinho', KITPS240B: 'Porta-Saquinho', KITPS480B: 'Porta-Saquinho',
+}
+const FAMILIAS_LISTA = ['Todas', 'Formas', 'Tapetes', 'Saquinhos', 'Porta-Saquinho']
+const FAMILIA_CORES: Record<string, string> = {
+  'Formas': '#f59e0b', 'Tapetes': '#a855f7',
+  'Saquinhos': '#0ea5e9', 'Porta-Saquinho': '#22c55e',
+}
 const LOJA_COLORS: Record<string, string> = {
   'KL MARKET': '#ff6600',
   'UNIVERSO DOS ACHADOS': '#0ea5e9',
@@ -130,7 +143,8 @@ export default function FinanceiroPage() {
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
   const [periodo,    setPeriodo]    = useState('personalizado')
-  const [buscaPedido, setBuscaPedido] = useState('')
+  const [buscaPedido,   setBuscaPedido]   = useState('')
+  const [familiaFiltro, setFamiliaFiltro] = useState('Todas')
   const fileRef = useRef<HTMLInputElement>(null)
 
   // FIX: hook centralizado — mesmo valor do DRE e demais páginas
@@ -259,6 +273,10 @@ export default function FinanceiroPage() {
     // Busca por ID do pedido ou SKU
     if (buscaPedido && !String(r.pedido || '').toLowerCase().includes(buscaPedido.toLowerCase())
                     && !String(r.sku    || '').toLowerCase().includes(buscaPedido.toLowerCase())) return false
+    if (familiaFiltro !== 'Todas') {
+      const familia = SKU_FAMILIA[String(r.sku || '').toUpperCase()] || 'Outros'
+      if (familia !== familiaFiltro) return false
+    }
     return true
   }).map(r => {
     const recBruta   = r.valor_bruto || 0
@@ -272,7 +290,7 @@ export default function FinanceiroPage() {
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
     return { ...r, recBruta, taxaShopee, custoProd: cProd, imp, custoTotal, lucroOp, margem }
-  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto, buscaPedido])
+  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto, buscaPedido, familiaFiltro])
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
   const totLuc  = filtered.reduce((s, r) => s + r.lucroOp, 0)
@@ -315,6 +333,23 @@ export default function FinanceiroPage() {
           <option value="Todas">Todas as lojas</option>
           {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
+
+        {/* Filtro de família */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          {FAMILIAS_LISTA.map(f => {
+            const ativo = familiaFiltro === f
+            const cor   = FAMILIA_CORES[f] || '#ff6600'
+            return (
+              <button key={f} onClick={() => setFamiliaFiltro(f)} style={{
+                background: ativo ? cor + '22' : 'transparent',
+                border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
+                color: ativo ? cor : '#555',
+                borderRadius: 6, padding: '6px 12px', cursor: 'pointer',
+                fontSize: 11, fontWeight: ativo ? 700 : 400,
+              }}>{f}</button>
+            )
+          })}
+        </div>
         {(['hoje', 'ontem', 'semana', 'mes', 'tudo', 'personalizado'] as const).map(p => (
           <button key={p} onClick={() => aplicarPeriodo(p)} style={{ background: periodo === p ? '#ff6600' : '#13131e', color: periodo === p ? '#fff' : '#9090aa', border: `1px solid ${periodo === p ? '#ff6600' : '#2a2a3a'}`, borderRadius: 7, padding: '7px 13px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}>
             {p === 'hoje' ? 'Hoje' : p === 'ontem' ? 'Ontem' : p === 'semana' ? 'Última Semana' : p === 'mes' ? 'Último Mês' : p === 'tudo' ? 'Tudo' : 'Personalizado'}
