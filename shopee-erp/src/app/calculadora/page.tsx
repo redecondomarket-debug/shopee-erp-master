@@ -83,7 +83,6 @@ function ResultRow({ label, value, sub, color = '#e2e2f0', highlight = false }: 
 export default function CalculadoraPage() {
   const [estoque,    setEstoque]    = useState<ProdutoBase[]>([])
   const [skuMapData, setSkuMapData] = useState<SkuMap[]>([])
-  const [financeiro, setFinanceiro] = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [familia,    setFamilia]    = useState('Formas')
 
@@ -92,62 +91,24 @@ export default function CalculadoraPage() {
   const [taxaShopee,   setTaxaShopee]   = useState('20')
   const [metaLucro,    setMetaLucro]    = useState('15')
   const [taxaFixa,     setTaxaFixa]     = useState('4')
+  const [imposto,      setImposto]      = useState('4')
   const [roasAtual,    setRoasAtual]    = useState('')
   const [gastoAds,     setGastoAds]     = useState('')
   const [vendasGeradas,setVendasGeradas]= useState('')
   const [custoManual,  setCustoManual]  = useState('')
-  const [usarCustoManual, setUsarCustoManual] = useState(false)
 
   useEffect(() => {
     Promise.all([
       supabase.from('estoque').select('sku_base,produto,custo,custo_embalagem'),
       supabase.from('sku_map').select('sku_venda,sku_base,quantidade'),
-      supabase.from('financeiro').select('sku,quantidade,valor_bruto,data').limit(10000),
-    ]).then(([e, s, f]) => {
+    ]).then(([e, s]) => {
       setEstoque(e.data || [])
       setSkuMapData(s.data || [])
-      setFinanceiro(f.data || [])
       setLoading(false)
     })
   }, [])
 
-  // Ticket médio do mês anterior por família
-  const ticketMesAnterior = useMemo(() => {
-    const hoje = new Date()
-    const mesAnt = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)
-    const mesAntFim = new Date(hoje.getFullYear(), hoje.getMonth(), 0)
-    const fmt = (d: Date) => d.toISOString().slice(0,10)
-    const from = fmt(mesAnt), to = fmt(mesAntFim)
-    const skusDaFamilia = Object.entries(SKU_FAMILIA)
-      .filter(([_, f]) => f === familia).map(([s]) => s)
-    const pedidosFam = financeiro.filter(f => {
-      if (!f.data || f.data < from || f.data > to) return false
-      return skusDaFamilia.includes(String(f.sku || '').toUpperCase())
-    })
-    if (!pedidosFam.length) return { ticketVenda: 0, ticketCusto: 0, pedidos: 0 }
-    const totalRec = pedidosFam.reduce((s, f) => s + (f.valor_bruto || 0), 0)
-    const totalPed = new Set(pedidosFam.map(f => f.pedido)).size || pedidosFam.length
-    // Custo médio: calcular para cada pedido
-    let totalCusto = 0
-    pedidosFam.forEach(f => {
-      const comps = skuMapData.filter(m => m.sku_venda === String(f.sku || '').toUpperCase())
-      const custo = comps.reduce((t, c) => {
-        const prod = estoque.find(e => e.sku_base === c.sku_base)
-        return t + (prod?.custo || 0) * (c.quantidade || 1) * (f.quantidade || 1)
-      }, 0)
-      const principal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
-      totalCusto += custo + (principal?.custo_embalagem || 0)
-    })
-    return {
-      ticketVenda: totalPed > 0 ? totalRec / totalPed : 0,
-      ticketCusto: totalPed > 0 ? totalCusto / totalPed : 0,
-      pedidos: totalPed,
-    }
-  }, [familia, financeiro, skuMapData, estoque])
-
-  // Custo médio da família do mês anterior (para preencher automaticamente)
-  const custoProdutoAuto = ticketMesAnterior.ticketCusto
-  const custoProduto = usarCustoManual ? (+custoManual || 0) : custoProdutoAuto
+  const custoProduto = +custoManual || 0
 
   // ── Cálculos principais ───────────────────────────────────────────────────
   const calc = useMemo(() => {
@@ -155,12 +116,14 @@ export default function CalculadoraPage() {
     const taxa = +taxaShopee  / 100
     const meta = +metaLucro   / 100
     const cp   = custoProduto
-    const tf   = +taxaFixa    || 0   // taxa fixa por venda
+    const tf   = +taxaFixa || 0
+    const imp  = +imposto  / 100
     if (p <= 0) return null
 
     const valorTaxaPct   = p * taxa
-    const valorTaxa      = valorTaxaPct + tf  // % + R$ fixo
-    const margemSemAds   = p - valorTaxa - cp          // MC antes de ads
+    const valorTaxa      = valorTaxaPct + tf       // % + R$ fixo
+    const valorImp       = p * imp                 // imposto sobre receita
+    const margemSemAds   = p - valorTaxa - cp - valorImp          // MC antes de ads
     const margemSemAdsPct= margemSemAds / p             // % da receita
 
     // ROAS de Empate: mínimo para não perder com ads
@@ -205,7 +168,7 @@ export default function CalculadoraPage() {
     }
 
     return {
-      preco: p, taxa: valorTaxa, taxaPct: taxa, cp, margemSemAds, margemSemAdsPct,
+      preco: p, taxa: valorTaxa, taxaPct: taxa, valorImp, imp, cp, margemSemAds, margemSemAdsPct,
       roasEmpate, roasIdeal, cpaEmpate, cpaIdeal, meta,
       analiseRoas, analiseCpa,
     }
@@ -258,58 +221,16 @@ export default function CalculadoraPage() {
               </div>
             </div>
 
-            {/* Tickets do mês anterior */}
-            {ticketMesAnterior.pedidos > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-                <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
-                  <div style={{ fontSize: 9, color: '#55556a', marginBottom: 3, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Ticket Médio Venda</div>
-                  <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#ff9933', fontSize: 14 }}>{R(ticketMesAnterior.ticketVenda)}</div>
-                  <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>mês anterior · {ticketMesAnterior.pedidos} pedidos</div>
-                </div>
-                <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px' }}>
-                  <div style={{ fontSize: 9, color: '#55556a', marginBottom: 3, textTransform: 'uppercase' as any, letterSpacing: 0.5 }}>Ticket Médio Custo</div>
-                  <div style={{ fontFamily: 'monospace', fontWeight: 800, color: '#888', fontSize: 14 }}>{R(ticketMesAnterior.ticketCusto)}</div>
-                  <div style={{ fontSize: 9, color: '#44445a', marginTop: 2 }}>custo médio por pedido</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ background: '#1a1a26', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: 11, color: '#44445a', textAlign: 'center' as any }}>
-                Sem dados do mês anterior para {familia}
-              </div>
-            )}
-
             <div style={{ marginBottom: 12 }}>
               <label style={S.label}>Preço de Venda (R$)</label>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input type="number" step="0.01" min="0" value={preco} onChange={e => setPreco(e.target.value)}
-                  placeholder="ex: 51,79" style={{ ...S.inp, flex: 1 } as any} />
-                {ticketMesAnterior.pedidos > 0 && (
-                  <button onClick={() => setPreco(ticketMesAnterior.ticketVenda.toFixed(2))}
-                    style={{ background: '#ff660022', color: '#ff6600', border: '1px solid #ff660044', borderRadius: 7, padding: '6px 10px', cursor: 'pointer', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' as any }}>
-                    Usar mês ant.
-                  </button>
-                )}
-              </div>
+              <input type="number" step="0.01" min="0" value={preco} onChange={e => setPreco(e.target.value)}
+                placeholder="ex: 51,79" style={S.inp as any} />
             </div>
 
-            {/* Custo do produto */}
             <div style={{ marginBottom: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                <label style={{ ...S.label, marginBottom: 0 }}>Custo do Produto (R$)</label>
-                <button onClick={() => setUsarCustoManual(!usarCustoManual)}
-                  style={{ background: 'none', border: 'none', color: '#ff6600', cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>
-                  {usarCustoManual ? '← Usar automático' : '✏️ Editar'}
-                </button>
-              </div>
-              {!usarCustoManual ? (
-                <div style={{ ...S.inp as any, color: '#9090aa', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>{R(custoProdutoAuto)}</span>
-                  <span style={{ fontSize: 10, color: '#44445a' }}>custo médio mês anterior</span>
-                </div>
-              ) : (
-                <input type="number" step="0.01" min="0" value={custoManual} onChange={e => setCustoManual(e.target.value)}
-                  placeholder="ex: 26,55" style={S.inp as any} />
-              )}
+              <label style={S.label}>Custo do Produto (R$)</label>
+              <input type="number" step="0.01" min="0" value={custoManual} onChange={e => setCustoManual(e.target.value)}
+                placeholder="ex: 26,55" style={S.inp as any} />
             </div>
           </div>
 
@@ -317,16 +238,23 @@ export default function CalculadoraPage() {
           <div style={S.card}>
             <div style={{ fontSize: 12, fontWeight: 700, color: '#f59e0b', marginBottom: 14, letterSpacing: 0.5 }}>⚙️ PARÂMETROS</div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
               <div>
                 <label style={S.label}>Taxa Shopee (%)</label>
                 <input type="number" step="0.1" min="0" max="100" value={taxaShopee}
                   onChange={e => setTaxaShopee(e.target.value)} style={S.inp as any} />
               </div>
               <div>
-                <label style={S.label}>Taxa Fixa (R$)</label>
+                <label style={S.label}>Taxa Fixa Shopee (R$)</label>
                 <input type="number" step="0.01" min="0" value={taxaFixa}
                   onChange={e => setTaxaFixa(e.target.value)} style={S.inp as any} />
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={S.label}>Imposto (%)</label>
+                <input type="number" step="0.1" min="0" max="100" value={imposto}
+                  onChange={e => setImposto(e.target.value)} style={S.inp as any} />
               </div>
               <div>
                 <label style={S.label}>Meta de Lucro (%)</label>
@@ -419,6 +347,7 @@ export default function CalculadoraPage() {
               <ResultRow label="Preço de Venda" value={R(calc.preco)} />
               <ResultRow label={`Taxa Shopee (${(calc.taxaPct*100).toFixed(0)}% + ${R(+taxaFixa||0)} fixo)`} value={`-${R(calc.taxa)}`} color="#f59e0b" />
               <ResultRow label="Custo do Produto" value={`-${R(calc.cp)}`} color="#888" />
+              <ResultRow label={`Imposto (${(calc.imp*100).toFixed(0)}%)`} value={`-${R(calc.valorImp)}`} color="#666" />
               <div style={{ margin: '8px 0' }} />
               <ResultRow label="Margem antes de Ads" value={`${R(calc.margemSemAds)} (${Pf(calc.margemSemAdsPct)})`}
                 color={calc.margemSemAds > 0 ? '#a78bfa' : '#ef4444'} highlight />
