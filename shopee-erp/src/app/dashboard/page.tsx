@@ -1,4 +1,4 @@
-'use client'
+a'use client'
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useTaxRate } from '@/hooks/useTaxRate'
@@ -555,7 +555,7 @@ export default function DashboardPage() {
 
   // ── Gráfico por mês (histórico completo, sem filtro de data) ──────────────
   const byMes: Record<string, number> = {}
-  financeiro.forEach(f => {
+  financeiro.filter(f => lojaFiltro === 'Todas' || f.loja === lojaFiltro).forEach(f => {
     if (!f.data) return
     const key = f.data.slice(0, 7)
     byMes[key] = (byMes[key] || 0) + (f.valor_bruto || 0)
@@ -608,7 +608,7 @@ export default function DashboardPage() {
 
   // ── Gráfico Ads por mês (histórico completo) ─────────────────────────────
   const byAds: Record<string, number> = {}
-  ads.forEach(a => {
+  ads.filter(a => lojaFiltro === 'Todas' || a.loja === lojaFiltro).forEach(a => {
     if (!a.data) return
     const key = a.data.slice(0, 7)
     byAds[key] = (byAds[key] || 0) + (a.investimento || 0)
