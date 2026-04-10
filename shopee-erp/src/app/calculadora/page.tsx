@@ -209,7 +209,7 @@ export default function CalculadoraPage() {
                   const ativo = familia === f
                   const cor   = FAMILIA_CORES_CAL[f] || '#ff6600'
                   return (
-                    <button key={f} onClick={() => { setFamilia(f); setUsarCustoManual(false) }} style={{
+                    <button key={f} onClick={() => { setFamilia(f); setCustoManual('') }} style={{
                       background: ativo ? cor + '22' : '#0f0f1a',
                       border: `1px solid ${ativo ? cor : '#2a2a3a'}`,
                       color: ativo ? cor : '#55556a',
