@@ -329,11 +329,10 @@ export default function MonitorRoasPage() {
     setIntervalos(prev => prev.filter(i => i.id !== id)); showToast('Removido')
   }
 
-  // ── Sincronizar histórico — calcula margem e lucro automaticamente ───────────
+  // ── Recalcular margem — usa gasto_ads já salvo no histórico ─────────────────
   async function sincronizarHistorico() {
     setSaving(true)
 
-    // Função local de custo (replica calcCalibracao mas por mês)
     function getCustoUnitLocal(sku: string): number {
       const comps = skuMapData.filter(m => m.sku_venda === sku)
       if (!comps.length) return 0
@@ -345,27 +344,30 @@ export default function MonitorRoasPage() {
       return c + (princ?.custo_embalagem || 0)
     }
 
-    const skusDaFamilia = Object.entries(SKU_FAMILIA).filter(([,f]) => f === familia).map(([s]) => s)
+    const lojaFiltroSync = loja === 'Todas' ? 'TODAS' : loja
+    const skusDaFamilia  = Object.entries(SKU_FAMILIA).filter(([,f]) => f === familia).map(([s]) => s)
 
-    // Buscar financeiro completo da família
-    const { data: finAll } = await supabase.from('financeiro').select('sku,quantidade,valor_bruto,data,loja,comissao_shopee')
+    // 1. Buscar registros já existentes no histórico (têm o gasto_ads manual)
+    const { data: histAtual } = await supabase.from('monitor_roas_historico')
+      .select('*').eq('sku_familia', familia).eq('loja', lojaFiltroSync)
+    const histMap: Record<string, any> = {}
+    for (const h of (histAtual||[])) histMap[h.mes_referencia] = h
+
+    // 2. Buscar financeiro da família para calcular faturamento + componentes de custo
+    const { data: finAll } = await supabase.from('financeiro')
+      .select('sku,quantidade,valor_bruto,data,loja,comissao_shopee')
     let rows = ((finAll || []) as any[]).filter(r => skusDaFamilia.includes(String(r.sku||'').toUpperCase()))
     if (loja !== 'Todas') rows = rows.filter(r => (r.loja||'').toUpperCase() === loja)
 
-    // Agrupa por mês calculando todos os componentes financeiros
-    const porMes: Record<string, {
-      vendas: number; taxas: number; custo: number; imp: number
-    }> = {}
-
+    // 3. Agrupar por mês
+    const porMes: Record<string, { vendas: number; taxas: number; custo: number; imp: number }> = {}
     for (const r of rows) {
       const ym  = String(r.data||'').slice(0,7); if (!ym) continue
       const sku = String(r.sku||'').toUpperCase()
       const qtd = r.quantidade || 1
       const rec = r.valor_bruto || 0
-      // Taxa Shopee: usa comissao_shopee se disponível, senão 20% + R$4
       const taxa = (r.comissao_shopee && r.comissao_shopee > 0)
-        ? r.comissao_shopee
-        : rec * 0.20 + 4
+        ? r.comissao_shopee : rec * 0.20 + 4
       const custo = getCustoUnitLocal(sku) * qtd
       const imp   = rec * (imposto / 100)
       if (!porMes[ym]) porMes[ym] = { vendas: 0, taxas: 0, custo: 0, imp: 0 }
@@ -375,53 +377,34 @@ export default function MonitorRoasPage() {
       porMes[ym].imp    += imp
     }
 
-    // Buscar ads
-    const { data: adsAll } = await supabase.from('ads').select('data,investimento,produto,loja')
-    const adsPorMes: Record<string, number> = {}
-    for (const a of (adsAll||[])) {
-      if (SKU_FAMILIA[String(a.produto||'').toUpperCase()] !== familia) continue
-      if (loja !== 'Todas' && (a.loja||'').toUpperCase() !== loja) continue
-      const ym = String(a.data||'').slice(0,7); if (!ym) continue
-      adsPorMes[ym] = (adsPorMes[ym]||0) + (a.investimento||0)
-    }
-
-    // Montar upserts com margem real calculada
-    const upserts = Object.entries(porMes).map(([ym, { vendas, taxas, custo, imp }]) => {
-      const ads    = adsPorMes[ym] || 0
-      // Margem = Receita - Taxas - Custo - Imposto - Ads (igual ao DRE)
-      const margem = vendas - taxas - custo - imp - ads
+    // 4. Para cada mês: usa gasto_ads do histórico existente e recalcula margem
+    const updates: any[] = []
+    for (const [ym, { vendas, taxas, custo, imp }] of Object.entries(porMes)) {
+      const hist = histMap[ym]
+      // Gasto ads: usa o que já está salvo no banco (lançado manualmente)
+      const ads = hist?.gasto_ads || 0
+      const margem    = vendas - taxas - custo - imp - ads
       const margemPct = vendas > 0 ? (margem / vendas) * 100 : 0
-      return {
+      updates.push({
         sku_familia: familia,
-        loja: loja === 'Todas' ? 'TODAS' : loja,
+        loja: lojaFiltroSync,
         mes_referencia: ym,
         faturamento: vendas,
-        gasto_ads: ads,
+        gasto_ads: ads,           // mantém o valor manual
         margem_pct: +margemPct.toFixed(2),
-        ajuste_manual: false,
-      }
-    })
+        ajuste_manual: hist?.ajuste_manual ?? false,
+      })
+    }
 
-    if (upserts.length > 0) {
-      // Buscar registros com ajuste_manual=true para não sobrescrever
-      const lojaFiltroSync = loja === 'Todas' ? 'TODAS' : loja
-      const { data: manuais } = await supabase.from('monitor_roas_historico')
-        .select('mes_referencia').eq('sku_familia', familia)
-        .eq('loja', lojaFiltroSync).eq('ajuste_manual', true)
-      const manuaisSet = new Set((manuais||[]).map((m: any) => m.mes_referencia))
-      // Filtra apenas os que NÃO foram ajustados manualmente
-      const toUpsert = upserts.filter(u => !manuaisSet.has(u.mes_referencia))
-      if (toUpsert.length > 0) {
-        await supabase.from('monitor_roas_historico').upsert(toUpsert, {
-          onConflict: 'sku_familia,loja,mes_referencia', ignoreDuplicates: false,
-        })
-      }
-      const pulados = upserts.length - toUpsert.length
+    if (updates.length > 0) {
+      await supabase.from('monitor_roas_historico').upsert(updates, {
+        onConflict: 'sku_familia,loja,mes_referencia', ignoreDuplicates: false,
+      })
       setSaving(false)
-      showToast(`${toUpsert.length} meses atualizados${pulados > 0 ? ` · ${pulados} manual(is) preservado(s)` : ''}`)
+      showToast(`${updates.length} meses recalculados com sucesso!`)
     } else {
       setSaving(false)
-      showToast('Nenhum dado encontrado para sincronizar')
+      showToast('Nenhum dado encontrado no Financeiro para esta família/loja')
     }
     loadHistorico()
   }
