@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 type ProdutoBase = { sku_base: string; custo: number; custo_embalagem: number }
 type SkuMap      = { sku_venda: string; sku_base: string; quantidade: number }
-type FinRow      = { sku: string; quantidade: number; valor_bruto: number; data: string; loja?: string }
+type FinRow      = { sku: string; quantidade: number; valor_bruto: number; data: string; loja?: string; comissao_shopee?: number }
 type Intervalo   = {
   id?: number
   sku_familia: string
@@ -120,7 +120,7 @@ export default function MonitorRoasPage() {
   const [familia,      setFamilia]      = useState('Tapetes')
   const [loja,         setLoja]         = useState('Todas')
   const [mesRef,       setMesRef]       = useState(mesAtual())
-  const [imposto,      setImposto]      = useState(4)     // % manual por loja
+  const [imposto,      setImposto]      = useState(4)
   const [loading,      setLoading]      = useState(true)
   const [saving,       setSaving]       = useState(false)
   const [toast,        setToast]        = useState<{ msg: string; type: string } | null>(null)
@@ -150,7 +150,6 @@ export default function MonitorRoasPage() {
 
   const showToast = (msg: string, type = 'ok') => setToast({ msg, type })
 
-  // Quando troca loja, atualiza imposto padrão
   useEffect(() => {
     if (loja !== 'Todas') setImposto(IMPOSTO_PADRAO[loja] ?? 4)
   }, [loja])
@@ -183,8 +182,6 @@ export default function MonitorRoasPage() {
   async function loadHistorico() {
     let q = supabase.from('monitor_roas_historico').select('*')
       .eq('sku_familia', familia).order('mes_referencia', { ascending: false }).limit(12)
-    // Quando filtro = 'Todas', buscar só registros loja='TODAS' (consolidado)
-    // Quando filtro = loja específica, buscar só aquela loja
     const lojaFiltro = loja === 'Todas' ? 'TODAS' : loja
     q = q.eq('loja', lojaFiltro) as any
     const { data } = await q
@@ -329,7 +326,10 @@ export default function MonitorRoasPage() {
     setIntervalos(prev => prev.filter(i => i.id !== id)); showToast('Removido')
   }
 
-  // ── Recalcular margem — usa gasto_ads já salvo no histórico ─────────────────
+  // ── SINCRONIZAR HISTÓRICO — usa comissao_shopee real do Financeiro ────────
+  // FIX: A taxa Shopee agora vem da coluna comissao_shopee (Taxa Shop real importada
+  // do Excel Shopee), igual ao cálculo do Dashboard. Antes usava rec*0.20+4 (estimativa),
+  // que divergia da taxa real e causava diferença no lucro acumulado.
   async function sincronizarHistorico() {
     setSaving(true)
 
@@ -353,23 +353,32 @@ export default function MonitorRoasPage() {
     const histMap: Record<string, any> = {}
     for (const h of (histAtual||[])) histMap[h.mes_referencia] = h
 
-    // 2. Buscar financeiro da família para calcular faturamento + componentes de custo
+    // 2. Buscar financeiro — inclui comissao_shopee (Taxa Shop real da Shopee)
     const { data: finAll } = await supabase.from('financeiro')
       .select('sku,quantidade,valor_bruto,data,loja,comissao_shopee')
-    let rows = ((finAll || []) as any[]).filter(r => skusDaFamilia.includes(String(r.sku||'').toUpperCase()))
+
+    let rows = ((finAll || []) as FinRow[]).filter(r =>
+      skusDaFamilia.includes(String(r.sku||'').toUpperCase())
+    )
     if (loja !== 'Todas') rows = rows.filter(r => (r.loja||'').toUpperCase() === loja)
 
-    // 3. Agrupar por mês
+    // 3. Agrupar por mês usando taxa real do financeiro
     const porMes: Record<string, { vendas: number; taxas: number; custo: number; imp: number }> = {}
     for (const r of rows) {
       const ym  = String(r.data||'').slice(0,7); if (!ym) continue
       const sku = String(r.sku||'').toUpperCase()
       const qtd = r.quantidade || 1
       const rec = r.valor_bruto || 0
+
+      // ✅ FIX PRINCIPAL: usa comissao_shopee real (Taxa Shop do Excel Shopee).
+      // Só usa estimativa 20% se o campo vier zerado/nulo — igual ao Dashboard.
       const taxa = (r.comissao_shopee && r.comissao_shopee > 0)
-        ? r.comissao_shopee : rec * 0.20 + 4
+        ? r.comissao_shopee
+        : rec * 0.20
+
       const custo = getCustoUnitLocal(sku) * qtd
       const imp   = rec * (imposto / 100)
+
       if (!porMes[ym]) porMes[ym] = { vendas: 0, taxas: 0, custo: 0, imp: 0 }
       porMes[ym].vendas += rec
       porMes[ym].taxas  += taxa
@@ -381,7 +390,7 @@ export default function MonitorRoasPage() {
     const updates: any[] = []
     for (const [ym, { vendas, taxas, custo, imp }] of Object.entries(porMes)) {
       const hist = histMap[ym]
-      // Gasto ads: usa o que já está salvo no banco (lançado manualmente)
+      // Gasto ads: mantém o valor já salvo manualmente no banco
       const ads = hist?.gasto_ads || 0
       const margem    = vendas - taxas - custo - imp - ads
       const margemPct = vendas > 0 ? (margem / vendas) * 100 : 0
@@ -390,7 +399,7 @@ export default function MonitorRoasPage() {
         loja: lojaFiltroSync,
         mes_referencia: ym,
         faturamento: vendas,
-        gasto_ads: ads,           // mantém o valor manual
+        gasto_ads: ads,
         margem_pct: +margemPct.toFixed(2),
         ajuste_manual: hist?.ajuste_manual ?? false,
       })
@@ -552,7 +561,6 @@ export default function MonitorRoasPage() {
                   ))}
                 </div>
 
-                {/* Nota explicativa sobre ROAS Ideal */}
                 {refs.roasIdeal > 20 && (
                   <div style={{ background:'#1a1a0f', border:'1px solid #f59e0b33', borderRadius:8, padding:'10px 12px', marginBottom:10, fontSize:11, color:'#9090aa', lineHeight:1.5 }}>
                     💡 <strong style={{ color:'#f59e0b' }}>Por que o ROAS Ideal é tão alto?</strong><br/>
@@ -760,15 +768,12 @@ export default function MonitorRoasPage() {
                           </td>
                           <td style={S.td as any}>{cenario ? <CenarioBadge label={cenario.label} /> : <span style={{ color:'#44445a' }}>—</span>}</td>
                           <td style={{ ...S.td, fontSize:11, color:'#9090aa', maxWidth:150, whiteSpace:'normal' as any }}>{cenario?.acao||'—'}</td>
-                          {/* Meta ROAS Anterior */}
                           <td style={{ ...S.td, fontFamily:'monospace', color:'#9090aa', textAlign:'center' as any }}>
                             {int.meta_roas > 0 ? `${int.meta_roas}x` : '—'}
                           </td>
-                          {/* Orçamento Diário Anterior */}
                           <td style={{ ...S.td, fontFamily:'monospace', color:'#9090aa', textAlign:'center' as any }}>
                             {int.orcamento_diario > 0 ? R(int.orcamento_diario) : '—'}
                           </td>
-                          {/* Novo Meta ROAS */}
                           <td style={{ ...S.td, fontFamily:'monospace', textAlign:'center' as any }}>
                             {int.novo_meta_roas > 0
                               ? <span style={{ color: int.novo_meta_roas > int.meta_roas ? '#22c55e' : '#ef4444', fontWeight:700 }}>
@@ -776,7 +781,6 @@ export default function MonitorRoasPage() {
                                 </span>
                               : <span style={{ color:'#33334a' }}>—</span>}
                           </td>
-                          {/* Novo Orçamento Diário */}
                           <td style={{ ...S.td, fontFamily:'monospace', textAlign:'center' as any }}>
                             {int.novo_orcamento_diario > 0
                               ? <span style={{ color: int.novo_orcamento_diario > int.orcamento_diario ? '#22c55e' : '#ef4444', fontWeight:700 }}>
@@ -851,8 +855,6 @@ export default function MonitorRoasPage() {
                     const ads       = ev.gasto_ads   ?? h.gasto_ads
                     const margPct   = ev.margem_pct  ?? h.margem_pct
                     const roas      = ads > 0 ? fat / ads : 0
-                    // margem_pct já inclui ads no denominador (calculado na sincronização)
-                    // lucro real = fat × margem% (não subtrai ads de novo)
                     const lucro     = fat * (margPct / 100)
 
                     const roasEmpRef = refs?.roasEmpate || 0
@@ -878,41 +880,32 @@ export default function MonitorRoasPage() {
                             ? <input type="number" value={ads} onChange={e => setEditHist(p => ({...p, [h.mes_referencia]:{...p[h.mes_referencia], gasto_ads:+e.target.value}}))} style={{ ...S.inp, width:110 } as any} step="0.01" />
                             : <span style={{ fontFamily:'monospace', color:'#f59e0b' }}>{R(ads)}</span>}
                         </td>
-                        {/* ROAS Real */}
                         <td style={{ ...S.td, fontFamily:'monospace', fontWeight:700, color:ok?'#22c55e':ads>0?'#ef4444':'#55556a' }}>
                           {roas > 0 ? `${roas.toFixed(2)}x` : '—'}
                         </td>
-                        {/* ROAS Empate */}
                         <td style={{ ...S.td, fontFamily:'monospace', color:'#f59e0b' }}>
                           {roasEmpRef > 0 ? `${roasEmpRef.toFixed(2)}x` : '—'}
                         </td>
-                        {/* Δ ROAS vs Empate */}
                         <td style={S.td as any}>
                           {roas > 0 && roasEmpRef > 0 ? <DiffBadge value={roas} base={roasEmpRef} /> : <span style={{ color:'#44445a' }}>—</span>}
                         </td>
-                        {/* CPA Médio */}
                         <td style={{ ...S.td, fontFamily:'monospace', color:cpaEst>0&&cpaMaxRef>0?(cpaEst<=cpaMaxRef?'#22c55e':'#ef4444'):'#9090aa' }}>
                           {cpaEst > 0 ? R(cpaEst) : '—'}
                         </td>
-                        {/* CPA Máximo */}
                         <td style={{ ...S.td, fontFamily:'monospace', color:'#f59e0b' }}>
                           {cpaMaxRef > 0 ? R(cpaMaxRef) : '—'}
                         </td>
-                        {/* Δ CPA vs Máximo */}
                         <td style={S.td as any}>
                           {cpaEst > 0 && cpaMaxRef > 0 ? <DiffBadge value={cpaEst} base={cpaMaxRef} invertido /> : <span style={{ color:'#44445a' }}>—</span>}
                         </td>
-                        {/* Margem */}
                         <td style={S.td as any}>
                           {isEditing
                             ? <input type="number" value={margPct} onChange={e => setEditHist(p => ({...p, [h.mes_referencia]:{...p[h.mes_referencia], margem_pct:+e.target.value}}))} style={{ ...S.inp, width:75 } as any} step="0.1" />
                             : <span style={{ fontFamily:'monospace', color: margPct > 0 ? '#22c55e' : margPct < 0 ? '#ef4444' : '#9090aa' }}>{margPct !== 0 ? `${margPct.toFixed(1)}%` : '—'}</span>}
                         </td>
-                        {/* Lucro estimado */}
                         <td style={{ ...S.td, fontFamily:'monospace', fontWeight:600, color:lucro>=0?'#22c55e':'#ef4444' }}>
                           {margPct !== 0 ? <span style={{ color: lucro >= 0 ? '#22c55e' : '#ef4444' }}>{R(lucro)}</span> : '—'}
                         </td>
-                        {/* Status */}
                         <td style={S.td as any}>
                           {roas > 0
                             ? <span style={{ background:(ok?'#22c55e':'#ef4444')+'18', color:ok?'#22c55e':'#ef4444', border:`1px solid ${ok?'#22c55e':'#ef4444'}33`, borderRadius:5, padding:'2px 7px', fontSize:11, fontWeight:700 }}>{ok?'✅ Verde':'⚠️ Atenção'}</span>
