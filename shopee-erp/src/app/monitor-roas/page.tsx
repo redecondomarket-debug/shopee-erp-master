@@ -19,6 +19,8 @@ type Intervalo   = {
   cpa_real: number
   meta_roas: number
   orcamento_diario: number
+  novo_meta_roas: number
+  novo_orcamento_diario: number
   created_at?: string
 }
 type HistoricoRow = {
@@ -140,7 +142,7 @@ export default function MonitorRoasPage() {
   // Form intervalo
   const [formInt, setFormInt] = useState<Partial<Intervalo>>({
     numero_intervalo: 1, periodo_label: '', vendas: 0, pedidos: 0,
-    gasto_ads: 0, cpa_real: 0, meta_roas: 10, orcamento_diario: 30,
+    gasto_ads: 0, cpa_real: 0, meta_roas: 10, orcamento_diario: 30, novo_meta_roas: 0, novo_orcamento_diario: 0,
     loja: 'KL MARKET',
   })
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -257,10 +259,10 @@ export default function MonitorRoasPage() {
     const consome  = int.gasto_ads >= (int.orcamento_diario * 5 * 0.85)
     const empate   = refs?.roasEmpate || (int.meta_roas || 8)
     const bateRoas = roasInt >= empate
-    if (consome  && bateRoas)  return { label: '✅ Cenário 3 — Escalar',      acao: 'Sobe meta +2 e orçamento +20%',     cor: '#22c55e' }
-    if (consome  && !bateRoas) return { label: '⚠️ Cenário 2 — Subir meta',   acao: 'Sobe meta +2, mantém orçamento',    cor: '#f59e0b' }
-    if (!consome && bateRoas)  return { label: '💡 Cenário 4 — Baixar meta',  acao: 'Baixa meta -2, mantém orçamento',   cor: '#0ea5e9' }
-    return                            { label: '🔴 Cenário 1 — Revisar',       acao: 'Baixa meta -2 e orçamento',         cor: '#ef4444' }
+    if (!consome && !bateRoas) return { label: '🔴 Cenário 1 — Revisar',      acao: 'Baixar meta ROAS e baixar orçamento', cor: '#ef4444' }
+    if (consome  && !bateRoas) return { label: '⚠️ Cenário 2 — Subir meta',   acao: 'Subir meta ROAS, manter orçamento',   cor: '#f59e0b' }
+    if (consome  && bateRoas)  return { label: '✅ Cenário 3 — Escalar',       acao: 'Subir meta ROAS e subir orçamento',   cor: '#22c55e' }
+    return                            { label: '💡 Cenário 4 — Melhor caso',   acao: 'Pode baixar ROAS para tracionar + baixar orçamento', cor: '#0ea5e9' }
   }
 
   // ── Decisão 2 últimos intervalos ──────────────────────────────────────────
@@ -298,6 +300,7 @@ export default function MonitorRoasPage() {
       numero_intervalo: formInt.numero_intervalo!, periodo_label: formInt.periodo_label || '',
       vendas: formInt.vendas||0, pedidos: formInt.pedidos||0, gasto_ads: formInt.gasto_ads||0,
       cpa_real: formInt.cpa_real||0, meta_roas: formInt.meta_roas||10, orcamento_diario: formInt.orcamento_diario||30,
+      novo_meta_roas: formInt.novo_meta_roas||0, novo_orcamento_diario: formInt.novo_orcamento_diario||0,
     }
     let error
     if (editingId) {
@@ -311,7 +314,7 @@ export default function MonitorRoasPage() {
     if (error) { showToast('Erro: ' + error.message, 'err'); return }
     showToast('Intervalo salvo!')
     setEditingId(null)
-    setFormInt({ numero_intervalo: 1, periodo_label: '', vendas: 0, pedidos: 0, gasto_ads: 0, cpa_real: 0, meta_roas: 10, orcamento_diario: 30, loja: 'KL MARKET' })
+    setFormInt({ numero_intervalo: 1, periodo_label: '', vendas: 0, pedidos: 0, gasto_ads: 0, cpa_real: 0, meta_roas: 10, orcamento_diario: 30, novo_meta_roas: 0, novo_orcamento_diario: 0, loja: 'KL MARKET' })
     loadIntervalos()
   }
 
@@ -623,12 +626,22 @@ export default function MonitorRoasPage() {
                   placeholder={formInt.gasto_ads&&formInt.pedidos ? R((formInt.gasto_ads||0)/(formInt.pedidos||1)) : 'ex: 5,70'} style={S.inp as any} />
               </div>
               <div>
-                <label style={S.label}>Meta ROAS</label>
+                <label style={S.label}>Meta ROAS (atual)</label>
                 <input type="number" step="0.5" value={formInt.meta_roas||''} onChange={e => setFormInt(f => ({...f, meta_roas:+e.target.value}))} style={S.inp as any} />
               </div>
               <div>
                 <label style={S.label}>Orç. Diário (R$)</label>
                 <input type="number" step="1" value={formInt.orcamento_diario||''} onChange={e => setFormInt(f => ({...f, orcamento_diario:+e.target.value}))} style={S.inp as any} />
+              </div>
+              <div>
+                <label style={S.label}>Novo Meta ROAS</label>
+                <input type="number" step="0.5" value={formInt.novo_meta_roas||''} onChange={e => setFormInt(f => ({...f, novo_meta_roas:+e.target.value}))}
+                  placeholder="0 = sem alteração" style={S.inp as any} />
+              </div>
+              <div>
+                <label style={S.label}>Novo Orçamento Diário (R$)</label>
+                <input type="number" step="1" value={formInt.novo_orcamento_diario||''} onChange={e => setFormInt(f => ({...f, novo_orcamento_diario:+e.target.value}))}
+                  placeholder="0 = sem alteração" style={S.inp as any} />
               </div>
             </div>
             <div style={{ display:'flex', gap:8 }}>
@@ -636,7 +649,7 @@ export default function MonitorRoasPage() {
                 {saving ? '⏳' : editingId ? '✓ Atualizar' : '✓ Salvar Intervalo'}
               </button>
               {editingId && (
-                <button onClick={() => { setEditingId(null); setFormInt({ numero_intervalo:1, periodo_label:'', vendas:0, pedidos:0, gasto_ads:0, cpa_real:0, meta_roas:10, orcamento_diario:30, loja:'KL MARKET' }) }}
+                <button onClick={() => { setEditingId(null); setFormInt({ numero_intervalo:1, periodo_label:'', vendas:0, pedidos:0, gasto_ads:0, cpa_real:0, meta_roas:10, orcamento_diario:30, novo_meta_roas:0, novo_orcamento_diario:0, loja:'KL MARKET' }) }}
                   style={{ background:'#13131e', color:'#9090aa', border:'1px solid #2a2a3a', borderRadius:8, padding:'9px 16px', cursor:'pointer', fontSize:12 }}>Cancelar</button>
               )}
             </div>
@@ -651,7 +664,7 @@ export default function MonitorRoasPage() {
               <div style={{ overflowX:'auto' as any }}>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
                   <thead>
-                    <tr>{['Loja','Intervalo','Período','Vendas','Pedidos','Ads','CPA Real','vs CPA Máx','ROAS Int.','vs Empate','ROAS Acum.','Consome?','Cenário','Ação',''].map(h =>
+                    <tr>{['Loja','Intervalo','Período','Vendas','Pedidos','Ads','CPA Real','vs CPA Máx','ROAS Int.','vs Empate','ROAS Acum.','Consome?','Cenário','Ação','Meta ROAS Ant.','Orç. Diário Ant.','Novo Meta ROAS','Novo Orç. Diário',''].map(h =>
                       <th key={h} style={S.th as any}>{h}</th>
                     )}</tr>
                   </thead>
@@ -696,6 +709,30 @@ export default function MonitorRoasPage() {
                           </td>
                           <td style={S.td as any}>{cenario ? <CenarioBadge label={cenario.label} /> : <span style={{ color:'#44445a' }}>—</span>}</td>
                           <td style={{ ...S.td, fontSize:11, color:'#9090aa', maxWidth:150, whiteSpace:'normal' as any }}>{cenario?.acao||'—'}</td>
+                          {/* Meta ROAS Anterior */}
+                          <td style={{ ...S.td, fontFamily:'monospace', color:'#9090aa', textAlign:'center' as any }}>
+                            {int.meta_roas > 0 ? `${int.meta_roas}x` : '—'}
+                          </td>
+                          {/* Orçamento Diário Anterior */}
+                          <td style={{ ...S.td, fontFamily:'monospace', color:'#9090aa', textAlign:'center' as any }}>
+                            {int.orcamento_diario > 0 ? R(int.orcamento_diario) : '—'}
+                          </td>
+                          {/* Novo Meta ROAS */}
+                          <td style={{ ...S.td, fontFamily:'monospace', textAlign:'center' as any }}>
+                            {int.novo_meta_roas > 0
+                              ? <span style={{ color: int.novo_meta_roas > int.meta_roas ? '#22c55e' : '#ef4444', fontWeight:700 }}>
+                                  {int.novo_meta_roas > int.meta_roas ? '▲' : '▼'} {int.novo_meta_roas}x
+                                </span>
+                              : <span style={{ color:'#33334a' }}>—</span>}
+                          </td>
+                          {/* Novo Orçamento Diário */}
+                          <td style={{ ...S.td, fontFamily:'monospace', textAlign:'center' as any }}>
+                            {int.novo_orcamento_diario > 0
+                              ? <span style={{ color: int.novo_orcamento_diario > int.orcamento_diario ? '#22c55e' : '#ef4444', fontWeight:700 }}>
+                                  {int.novo_orcamento_diario > int.orcamento_diario ? '▲' : '▼'} {R(int.novo_orcamento_diario)}
+                                </span>
+                              : <span style={{ color:'#33334a' }}>—</span>}
+                          </td>
                           <td style={S.td as any}>
                             <div style={{ display:'flex', gap:4 }}>
                               <button onClick={() => editarIntervalo(int)} style={{ background:'#ff660018', color:'#ff6600', border:'1px solid #ff660030', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:11 }}>✏️</button>
