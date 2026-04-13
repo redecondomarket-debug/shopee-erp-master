@@ -329,22 +329,53 @@ export default function MonitorRoasPage() {
     setIntervalos(prev => prev.filter(i => i.id !== id)); showToast('Removido')
   }
 
-  // ── Sincronizar histórico ─────────────────────────────────────────────────
+  // ── Sincronizar histórico — calcula margem e lucro automaticamente ───────────
   async function sincronizarHistorico() {
     setSaving(true)
-    const skusDaFamilia = Object.entries(SKU_FAMILIA).filter(([,f]) => f === familia).map(([s]) => s)
-    let q = supabase.from('financeiro').select('sku,quantidade,valor_bruto,data,loja')
-    const { data: finAll } = await q
-    let rows = ((finAll || []) as FinRow[]).filter(r => skusDaFamilia.includes(String(r.sku||'').toUpperCase()))
-    if (loja !== 'Todas') rows = rows.filter(r => (r.loja||'').toUpperCase() === loja)
 
-    const porMes: Record<string, { vendas: number }> = {}
-    for (const r of rows) {
-      const ym = String(r.data||'').slice(0,7); if (!ym) continue
-      if (!porMes[ym]) porMes[ym] = { vendas: 0 }
-      porMes[ym].vendas += r.valor_bruto || 0
+    // Função local de custo (replica calcCalibracao mas por mês)
+    function getCustoUnitLocal(sku: string): number {
+      const comps = skuMapData.filter(m => m.sku_venda === sku)
+      if (!comps.length) return 0
+      const c = comps.reduce((t, comp) => {
+        const p = estoque.find(e => e.sku_base === comp.sku_base)
+        return t + (p?.custo || 0) * (comp.quantidade || 1)
+      }, 0)
+      const princ = estoque.find(e => e.sku_base === comps[0]?.sku_base)
+      return c + (princ?.custo_embalagem || 0)
     }
 
+    const skusDaFamilia = Object.entries(SKU_FAMILIA).filter(([,f]) => f === familia).map(([s]) => s)
+
+    // Buscar financeiro completo da família
+    const { data: finAll } = await supabase.from('financeiro').select('sku,quantidade,valor_bruto,data,loja,comissao_shopee')
+    let rows = ((finAll || []) as any[]).filter(r => skusDaFamilia.includes(String(r.sku||'').toUpperCase()))
+    if (loja !== 'Todas') rows = rows.filter(r => (r.loja||'').toUpperCase() === loja)
+
+    // Agrupa por mês calculando todos os componentes financeiros
+    const porMes: Record<string, {
+      vendas: number; taxas: number; custo: number; imp: number
+    }> = {}
+
+    for (const r of rows) {
+      const ym  = String(r.data||'').slice(0,7); if (!ym) continue
+      const sku = String(r.sku||'').toUpperCase()
+      const qtd = r.quantidade || 1
+      const rec = r.valor_bruto || 0
+      // Taxa Shopee: usa comissao_shopee se disponível, senão 20% + R$4
+      const taxa = (r.comissao_shopee && r.comissao_shopee > 0)
+        ? r.comissao_shopee
+        : rec * 0.20 + 4
+      const custo = getCustoUnitLocal(sku) * qtd
+      const imp   = rec * (imposto / 100)
+      if (!porMes[ym]) porMes[ym] = { vendas: 0, taxas: 0, custo: 0, imp: 0 }
+      porMes[ym].vendas += rec
+      porMes[ym].taxas  += taxa
+      porMes[ym].custo  += custo
+      porMes[ym].imp    += imp
+    }
+
+    // Buscar ads
     const { data: adsAll } = await supabase.from('ads').select('data,investimento,produto,loja')
     const adsPorMes: Record<string, number> = {}
     for (const a of (adsAll||[])) {
@@ -354,18 +385,31 @@ export default function MonitorRoasPage() {
       adsPorMes[ym] = (adsPorMes[ym]||0) + (a.investimento||0)
     }
 
-    const upserts = Object.entries(porMes).map(([ym, { vendas }]) => ({
-      sku_familia: familia, loja: loja === 'Todas' ? 'TODAS' : loja,
-      mes_referencia: ym, faturamento: vendas, gasto_ads: adsPorMes[ym]||0,
-      margem_pct: 0, ajuste_manual: false,
-    }))
+    // Montar upserts com margem real calculada
+    const upserts = Object.entries(porMes).map(([ym, { vendas, taxas, custo, imp }]) => {
+      const ads    = adsPorMes[ym] || 0
+      // Margem = Receita - Taxas - Custo - Imposto - Ads (igual ao DRE)
+      const margem = vendas - taxas - custo - imp - ads
+      const margemPct = vendas > 0 ? (margem / vendas) * 100 : 0
+      return {
+        sku_familia: familia,
+        loja: loja === 'Todas' ? 'TODAS' : loja,
+        mes_referencia: ym,
+        faturamento: vendas,
+        gasto_ads: ads,
+        margem_pct: +margemPct.toFixed(2),
+        ajuste_manual: false,
+      }
+    })
 
     if (upserts.length > 0) {
       await supabase.from('monitor_roas_historico').upsert(upserts, {
         onConflict: 'sku_familia,loja,mes_referencia', ignoreDuplicates: false,
       })
     }
-    setSaving(false); showToast(`${upserts.length} meses sincronizados!`); loadHistorico()
+    setSaving(false)
+    showToast(`${upserts.length} meses sincronizados com margem real!`)
+    loadHistorico()
   }
 
   async function deletarHistorico(id: number) {
@@ -794,7 +838,7 @@ export default function MonitorRoasPage() {
             <div style={{ overflowX:'auto' as any }}>
               <table style={{ width:'100%', borderCollapse:'collapse' }}>
                 <thead>
-                  <tr>{['Mês','Faturamento','Gasto Ads','ROAS Real','ROAS Empate','Δ ROAS vs Empate','CPA Médio','CPA Máximo','Δ CPA vs Máximo','Margem (%)','Lucro Est.','Status',''].map(h =>
+                  <tr>{['Mês','Faturamento','Gasto Ads','ROAS Real','ROAS Empate','Δ ROAS vs Empate','CPA Médio','CPA Máximo','Δ CPA vs Máximo','Margem (%)','Lucro Real','Status',''].map(h =>
                     <th key={h} style={S.th as any}>{h}</th>
                   )}</tr>
                 </thead>
@@ -810,14 +854,12 @@ export default function MonitorRoasPage() {
                     const ads       = ev.gasto_ads   ?? h.gasto_ads
                     const margPct   = ev.margem_pct  ?? h.margem_pct
                     const roas      = ads > 0 ? fat / ads : 0
-                    const lucro     = fat * (margPct / 100) - ads
+                    // margem_pct já inclui ads no denominador (calculado na sincronização)
+                    // lucro real = fat × margem% (não subtrai ads de novo)
+                    const lucro     = fat * (margPct / 100)
 
-                    // Referências do mês histórico — usa imposto atual como aproximação
-                    // Para histórico, calculamos ROAS empate e CPA estimados
-                    // Usamos margem informada como proxy
                     const roasEmpRef = refs?.roasEmpate || 0
                     const cpaMaxRef  = refs?.cpaMax || 0
-                    // CPA médio estimado do mês: ads / pedidos estimados (fat / ticket médio)
                     const pedidosEst = ticketMedio > 0 ? Math.round(fat / ticketMedio) : 0
                     const cpaEst     = pedidosEst > 0 ? ads / pedidosEst : 0
 
@@ -867,11 +909,11 @@ export default function MonitorRoasPage() {
                         <td style={S.td as any}>
                           {isEditing
                             ? <input type="number" value={margPct} onChange={e => setEditHist(p => ({...p, [h.mes_referencia]:{...p[h.mes_referencia], margem_pct:+e.target.value}}))} style={{ ...S.inp, width:75 } as any} step="0.1" />
-                            : <span style={{ fontFamily:'monospace' }}>{margPct > 0 ? `${margPct.toFixed(1)}%` : '—'}</span>}
+                            : <span style={{ fontFamily:'monospace', color: margPct > 0 ? '#22c55e' : margPct < 0 ? '#ef4444' : '#9090aa' }}>{margPct !== 0 ? `${margPct.toFixed(1)}%` : '—'}</span>}
                         </td>
                         {/* Lucro estimado */}
                         <td style={{ ...S.td, fontFamily:'monospace', fontWeight:600, color:lucro>=0?'#22c55e':'#ef4444' }}>
-                          {margPct > 0 ? R(lucro) : '—'}
+                          {margPct !== 0 ? <span style={{ color: lucro >= 0 ? '#22c55e' : '#ef4444' }}>{R(lucro)}</span> : '—'}
                         </td>
                         {/* Status */}
                         <td style={S.td as any}>
