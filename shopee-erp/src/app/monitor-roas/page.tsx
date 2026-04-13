@@ -183,7 +183,10 @@ export default function MonitorRoasPage() {
   async function loadHistorico() {
     let q = supabase.from('monitor_roas_historico').select('*')
       .eq('sku_familia', familia).order('mes_referencia', { ascending: false }).limit(12)
-    if (loja !== 'Todas') q = q.eq('loja', loja) as any
+    // Quando filtro = 'Todas', buscar só registros loja='TODAS' (consolidado)
+    // Quando filtro = loja específica, buscar só aquela loja
+    const lojaFiltro = loja === 'Todas' ? 'TODAS' : loja
+    q = q.eq('loja', lojaFiltro) as any
     const { data } = await q
     setHistorico(data || [])
   }
@@ -363,6 +366,13 @@ export default function MonitorRoasPage() {
       })
     }
     setSaving(false); showToast(`${upserts.length} meses sincronizados!`); loadHistorico()
+  }
+
+  async function deletarHistorico(id: number) {
+    if (!confirm('Apagar este mês do histórico?')) return
+    await supabase.from('monitor_roas_historico').delete().eq('id', id)
+    showToast('Registro removido!')
+    loadHistorico()
   }
 
   async function salvarAjusteHistorico(ym: string) {
@@ -773,8 +783,11 @@ export default function MonitorRoasPage() {
               {loja !== 'Todas' && <span style={{ color:LOJA_COR[loja]||'#ff6600', marginLeft:6, fontWeight:600 }}>· {loja}</span>}
             </div>
             <button onClick={sincronizarHistorico} disabled={saving} style={{ background:cor+'22', color:cor, border:`1px solid ${cor}44`, borderRadius:8, padding:'8px 18px', cursor:'pointer', fontWeight:700, fontSize:12 }}>
-              {saving ? '⏳' : '🔄 Sincronizar com Financeiro'}
+              {saving ? '⏳ Sincronizando...' : '🔄 Sincronizar com Financeiro'}
             </button>
+            <div style={{ fontSize:10, color:'#33334a', marginTop:6, textAlign:'right' as any }}>
+              Sincroniza {loja === 'Todas' ? 'todas as lojas consolidadas' : loja} · Use ✕ para apagar linhas duplicadas
+            </div>
           </div>
 
           <div style={S.card}>
@@ -872,7 +885,10 @@ export default function MonitorRoasPage() {
                                 <button onClick={() => salvarAjusteHistorico(h.mes_referencia)} style={{ background:'#22c55e22', color:'#22c55e', border:'1px solid #22c55e44', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:11, fontWeight:700 }}>✓</button>
                                 <button onClick={() => setEditHist(p => { const n={...p}; delete n[h.mes_referencia]; return n })} style={{ background:'#13131e', color:'#9090aa', border:'1px solid #2a2a3a', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:11 }}>✕</button>
                               </div>
-                            : <button onClick={() => setEditHist(p => ({...p, [h.mes_referencia]:{}}))} style={{ background:'#ff660018', color:'#ff6600', border:'1px solid #ff660030', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:11 }}>✏️</button>}
+                            : <div style={{ display:'flex', gap:4 }}>
+                                <button onClick={() => setEditHist(p => ({...p, [h.mes_referencia]:{}}))} style={{ background:'#ff660018', color:'#ff6600', border:'1px solid #ff660030', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:11 }}>✏️</button>
+                                <button onClick={() => h.id && deletarHistorico(h.id)} style={{ background:'#ef444418', color:'#ef4444', border:'1px solid #ef444430', borderRadius:6, padding:'4px 10px', cursor:'pointer', fontSize:11 }}>✕</button>
+                              </div>}
                         </td>
                       </tr>
                     )
