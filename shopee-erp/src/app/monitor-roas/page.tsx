@@ -403,12 +403,26 @@ export default function MonitorRoasPage() {
     })
 
     if (upserts.length > 0) {
-      await supabase.from('monitor_roas_historico').upsert(upserts, {
-        onConflict: 'sku_familia,loja,mes_referencia', ignoreDuplicates: false,
-      })
+      // Buscar registros com ajuste_manual=true para não sobrescrever
+      const lojaFiltroSync = loja === 'Todas' ? 'TODAS' : loja
+      const { data: manuais } = await supabase.from('monitor_roas_historico')
+        .select('mes_referencia').eq('sku_familia', familia)
+        .eq('loja', lojaFiltroSync).eq('ajuste_manual', true)
+      const manuaisSet = new Set((manuais||[]).map((m: any) => m.mes_referencia))
+      // Filtra apenas os que NÃO foram ajustados manualmente
+      const toUpsert = upserts.filter(u => !manuaisSet.has(u.mes_referencia))
+      if (toUpsert.length > 0) {
+        await supabase.from('monitor_roas_historico').upsert(toUpsert, {
+          onConflict: 'sku_familia,loja,mes_referencia', ignoreDuplicates: false,
+        })
+      }
+      const pulados = upserts.length - toUpsert.length
+      setSaving(false)
+      showToast(`${toUpsert.length} meses atualizados${pulados > 0 ? ` · ${pulados} manual(is) preservado(s)` : ''}`)
+    } else {
+      setSaving(false)
+      showToast('Nenhum dado encontrado para sincronizar')
     }
-    setSaving(false)
-    showToast(`${upserts.length} meses sincronizados com margem real!`)
     loadHistorico()
   }
 
