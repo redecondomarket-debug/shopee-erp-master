@@ -370,11 +370,10 @@ export default function MonitorRoasPage() {
       const qtd = r.quantidade || 1
       const rec = r.valor_bruto || 0
 
-      // ✅ FIX PRINCIPAL: usa comissao_shopee real (Taxa Shop do Excel Shopee).
-      // Só usa estimativa 20% se o campo vier zerado/nulo — igual ao Dashboard.
-      const taxa = (r.comissao_shopee && r.comissao_shopee > 0)
-        ? r.comissao_shopee
-        : rec * 0.20
+      // ✅ FIX PRINCIPAL: usa comissao_shopee real (Taxa Shop importada do Excel Shopee).
+      // Igual ao Dashboard — soma direto o valor real, sem estimativa.
+      // Se vier zerado num pedido isolado, soma 0 mesmo (igual o Dashboard faz).
+      const taxa = r.comissao_shopee || 0
 
       const custo = getCustoUnitLocal(sku) * qtd
       const imp   = rec * (imposto / 100)
