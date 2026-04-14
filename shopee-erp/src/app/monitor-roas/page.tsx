@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useTaxRate } from '@/hooks/useTaxRate'
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 type ProdutoBase = { sku_base: string; custo: number; custo_embalagem: number }
@@ -120,11 +121,15 @@ export default function MonitorRoasPage() {
   const [familia,      setFamilia]      = useState('Tapetes')
   const [loja,         setLoja]         = useState('Todas')
   const [mesRef,       setMesRef]       = useState(mesAtual())
-  const [imposto,      setImposto]      = useState(4)
+  const [imposto,      setImposto]      = useState(4)   // imposto local da Calibração (ajustável na tela)
   const [loading,      setLoading]      = useState(true)
   const [saving,       setSaving]       = useState(false)
   const [toast,        setToast]        = useState<{ msg: string; type: string } | null>(null)
   const [activeTab,    setActiveTab]    = useState<'calibracao'|'intervalos'|'historico'>('calibracao')
+
+  // ✅ FIX: hook centralizado — mesmo imposto global do Dashboard e Financeiro
+  // Usado na sincronização do histórico para garantir que os cálculos batam
+  const { imposto: impostoGlobal } = useTaxRate()
 
   const [estoque,      setEstoque]      = useState<ProdutoBase[]>([])
   const [skuMapData,   setSkuMapData]   = useState<SkuMap[]>([])
@@ -370,13 +375,15 @@ export default function MonitorRoasPage() {
       const qtd = r.quantidade || 1
       const rec = r.valor_bruto || 0
 
-      // ✅ FIX PRINCIPAL: usa comissao_shopee real (Taxa Shop importada do Excel Shopee).
-      // Igual ao Dashboard — soma direto o valor real, sem estimativa.
-      // Se vier zerado num pedido isolado, soma 0 mesmo (igual o Dashboard faz).
-      const taxa = r.comissao_shopee || 0
+      // ✅ FIX: lógica IDÊNTICA ao Dashboard
+      // Dashboard: comissao_shopee se > 0, senão rec * 0.20 (fallback sem R$4)
+      const taxa = (r.comissao_shopee && r.comissao_shopee > 0)
+        ? r.comissao_shopee
+        : rec * 0.20
 
       const custo = getCustoUnitLocal(sku) * qtd
-      const imp   = rec * (imposto / 100)
+      // ✅ FIX: usa impostoGlobal do useTaxRate hook — mesmo valor do Dashboard
+      const imp   = rec * impostoGlobal
 
       if (!porMes[ym]) porMes[ym] = { vendas: 0, taxas: 0, custo: 0, imp: 0 }
       porMes[ym].vendas += rec
