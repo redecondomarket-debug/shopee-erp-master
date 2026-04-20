@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 
 const N = (v: number) => new Intl.NumberFormat('pt-BR').format(+v || 0)
+const R = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(+v || 0)
 
 const S = {
   page:     { padding: '20px 24px', width: '100%', boxSizing: 'border-box' as any },
@@ -17,8 +18,8 @@ const S = {
   label:    { fontSize: 11, color: '#55556a', marginBottom: 5, display: 'block', fontWeight: 600, letterSpacing: 0.8, textTransform: 'uppercase' as any },
 }
 
-type Item = { id: string; sku_base: string; produto: string; estoque_atual: number; estoque_minimo: number }
-type MovEntry = { id: string; sku_base: string; quantidade: number; tipo: string; data?: string; observacao?: string }
+type Item = { id: string; sku_base: string; produto: string; estoque_atual: number; estoque_minimo: number; custo: number; custo_embalagem: number }
+type MovEntry = { id: string; sku_base: string; quantidade: number; tipo: string; data?: string; observacao?: string; custo_unitario?: number }
 
 function Badge({ v, min }: { v: number; min: number }) {
   const empty = v <= 0
@@ -34,7 +35,7 @@ function Badge({ v, min }: { v: number; min: number }) {
 function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-      <div style={{ ...S.card, width: '100%', maxWidth: 480, padding: '28px 32px' }}>{children}</div>
+      <div style={{ ...S.card, width: '100%', maxWidth: 520, padding: '28px 32px' }}>{children}</div>
     </div>
   )
 }
@@ -52,14 +53,21 @@ export default function EstoquePage() {
   const [showMov,    setShowMov]    = useState(false)
   const [showDel,    setShowDel]    = useState(false)
   const [limpando,   setLimpando]   = useState(false)
-  const [showHist,   setShowHist]   = useState(false)   // modal histórico
+  const [showHist,   setShowHist]   = useState(false)
   const [histEntradas, setHistEntradas] = useState<MovEntry[]>([])
   const [editMovId,  setEditMovId]  = useState<string | null>(null)
   const [editMovVals,setEditMovVals]= useState<Partial<MovEntry>>({})
   const [savingMov,  setSavingMov]  = useState(false)
   const [toast,      setToast]      = useState({ msg: '', type: 'ok' })
   const [newItem,    setNewItem]    = useState({ sku_base: '', produto: '', estoque_atual: 0, estoque_minimo: 0 })
-  const [mov,        setMov]        = useState({ data: new Date().toISOString().slice(0,10), tipo: 'ENTRADA', sku_base: '', quantidade: 0, observacao: '' })
+  const [mov,        setMov]        = useState({
+    data: new Date().toISOString().slice(0,10),
+    tipo: 'ENTRADA',
+    sku_base: '',
+    quantidade: 0,
+    custo_unitario: 0,   // ← NOVO campo
+    observacao: ''
+  })
 
   useEffect(() => { load() }, [])
 
@@ -83,19 +91,15 @@ export default function EstoquePage() {
     setTimeout(() => setToast({ msg: '', type: 'ok' }), 3000)
   }
 
-  // Histórico de compra = estoque_atual (setup inicial) + SOMA(ENTRADAs em movimentacoes)
-  // IMPORTANTE: estoque_atual NO BANCO representa o valor inicial do setup e NUNCA é alterado
-  // após o setup. Todas as entradas posteriores vão APENAS para movimentacoes.
   const historicoCompra = useMemo(() => {
     const map: Record<string, number> = {}
-    items.forEach(i => { map[i.sku_base] = i.estoque_atual }) // base: estoque inicial do setup
+    items.forEach(i => { map[i.sku_base] = i.estoque_atual })
     movEntries.filter(m => m.tipo === 'ENTRADA').forEach(m => {
       map[m.sku_base] = (map[m.sku_base] || 0) + (m.quantidade || 0)
     })
     return map
   }, [items, movEntries])
 
-  // Consumo por vendas = cruzamento financeiro × sku_map
   const consumoVendas = useMemo(() => {
     const map: Record<string, number> = {}
     financeiro.forEach(f => {
@@ -107,6 +111,19 @@ export default function EstoquePage() {
     })
     return map
   }, [financeiro, skuMap])
+
+  // Custo mais recente por sku_base (para exibir na tabela)
+  const custoAtualPorSku = useMemo(() => {
+    const map: Record<string, number> = {}
+    // Base: custo do cadastro de estoque
+    items.forEach(i => { if (i.custo > 0) map[i.sku_base] = i.custo })
+    // Sobrescreve com a entrada mais recente que tiver custo
+    const entradas = movEntries
+      .filter(m => m.tipo === 'ENTRADA' && (m.custo_unitario || 0) > 0)
+      .sort((a, b) => (a.data || '').localeCompare(b.data || ''))
+    entradas.forEach(m => { map[m.sku_base] = m.custo_unitario! })
+    return map
+  }, [items, movEntries])
 
   async function saveEdit(id: string) {
     await supabase.from('estoque').update(editVals).eq('id', id)
@@ -121,7 +138,6 @@ export default function EstoquePage() {
     load()
   }
 
-  // Abrir modal de histórico e carregar entradas
   async function openHistorico() {
     const { data } = await supabase
       .from('movimentacoes')
@@ -132,25 +148,23 @@ export default function EstoquePage() {
     setShowHist(true)
   }
 
-  // Salvar edição de uma entrada no histórico
   async function salvarEditMov() {
     if (!editMovId) return
     setSavingMov(true)
     await supabase.from('movimentacoes').update({
-      data:       editMovVals.data,
-      quantidade: editMovVals.quantidade,
-      observacao: editMovVals.observacao,
+      data:           editMovVals.data,
+      quantidade:     editMovVals.quantidade,
+      custo_unitario: editMovVals.custo_unitario,
+      observacao:     editMovVals.observacao,
     }).eq('id', editMovId)
     setSavingMov(false)
     setEditMovId(null)
-    // Atualiza lista do modal e recarrega página
     const { data } = await supabase.from('movimentacoes').select('*').eq('tipo', 'ENTRADA').order('data', { ascending: false })
     setHistEntradas(data || [])
     load()
     showToast('Entrada atualizada!')
   }
 
-  // Deletar uma entrada do histórico
   async function deletarEntrada(id: string) {
     if (!confirm('Excluir esta entrada? O estoque será recalculado.')) return
     await supabase.from('movimentacoes').delete().eq('id', id)
@@ -164,50 +178,37 @@ export default function EstoquePage() {
     const item = items.find(i => i.sku_base === mov.sku_base)
     if (!item) { showToast('Selecione um produto', 'err'); return }
     if (!mov.quantidade || mov.quantidade <= 0) { showToast('Informe a quantidade', 'err'); return }
+    if (mov.tipo === 'ENTRADA' && (!mov.custo_unitario || mov.custo_unitario <= 0)) {
+      showToast('Informe o custo unitário da entrada', 'err'); return
+    }
 
     if (mov.tipo === 'AJUSTE') {
-      // AJUSTE: define o novo estoque_atual (valor de setup)
-      // Aqui é a ÚNICA exceção onde estoque_atual é atualizado:
-      // o AJUSTE redefine a base do estoque (zera o histórico implicitamente)
       const estoqueRealAtual = (historicoCompra[item.sku_base] || 0) - (consumoVendas[item.sku_base] || 0)
       const delta = Math.abs(mov.quantidade - estoqueRealAtual)
-
-      // Para AJUSTE: atualiza estoque_atual e zera movimentacoes de ENTRADA
-      // para que a fórmula historicoCompra - consumo seja consistente
       await supabase.from('estoque').update({ estoque_atual: mov.quantidade }).eq('id', item.id)
-
-      // Apaga ENTRADAs anteriores deste produto para evitar acúmulo incorreto
-      await supabase.from('movimentacoes')
-        .delete()
-        .eq('sku_base', item.sku_base)
-        .eq('tipo', 'ENTRADA')
-
-      // Registra o ajuste no histórico
+      await supabase.from('movimentacoes').delete().eq('sku_base', item.sku_base).eq('tipo', 'ENTRADA')
       await supabase.from('movimentacoes').insert({
-        data:        mov.data,
-        tipo:        'AJUSTE',
-        sku_base:    mov.sku_base,
-        quantidade:  delta,
-        origem:      'Manual',
-        observacao:  mov.observacao || `Ajuste para ${mov.quantidade} un`,
+        data: mov.data, tipo: 'AJUSTE', sku_base: mov.sku_base,
+        quantidade: delta, origem: 'Manual',
+        observacao: mov.observacao || `Ajuste para ${mov.quantidade} un`,
+        custo_unitario: 0,
       })
     } else {
-      // FIX: ENTRADA — NÃO atualiza estoque_atual no banco
-      // Vai APENAS para movimentacoes
-      // historicoCompra = estoque_atual (setup) + SOMA(ENTRADAs) → já soma automaticamente
+      // ENTRADA — salva com custo_unitario
       await supabase.from('movimentacoes').insert({
-        data:        mov.data,
-        tipo:        'ENTRADA',
-        sku_base:    mov.sku_base,
-        quantidade:  mov.quantidade,
-        origem:      'Manual',
-        observacao:  mov.observacao,
+        data:           mov.data,
+        tipo:           'ENTRADA',
+        sku_base:       mov.sku_base,
+        quantidade:     mov.quantidade,
+        custo_unitario: mov.custo_unitario,  // ← salva o custo
+        origem:         'Manual',
+        observacao:     mov.observacao,
       })
     }
 
     showToast('Movimentação registrada!')
     setShowMov(false)
-    setMov({ data: new Date().toISOString().slice(0,10), tipo: 'ENTRADA', sku_base: '', quantidade: 0, observacao: '' })
+    setMov({ data: new Date().toISOString().slice(0,10), tipo: 'ENTRADA', sku_base: '', quantidade: 0, custo_unitario: 0, observacao: '' })
     load()
   }
 
@@ -219,7 +220,6 @@ export default function EstoquePage() {
 
   async function limparTudo() {
     setLimpando(true)
-    // Zera movimentacoes e reseta estoque_atual para 0
     await supabase.from('movimentacoes').delete().neq('id', '00000000-0000-0000-0000-000000000000')
     for (const i of items) await supabase.from('estoque').update({ estoque_atual: 0 }).eq('id', i.id)
     setShowDel(false); setLimpando(false)
@@ -271,6 +271,7 @@ export default function EstoquePage() {
         <span>📥 <strong style={{ color: '#a78bfa' }}>Histórico de Compra</strong> = estoque inicial + entradas registradas</span>
         <span>📤 <strong style={{ color: '#f59e0b' }}>Consumo Vendas</strong> = calculado automaticamente pelas vendas importadas</span>
         <span>📦 <strong style={{ color: '#22c55e' }}>Estoque Real</strong> = Compras − Consumo</span>
+        <span>💰 <strong style={{ color: '#0ea5e9' }}>Custo Atual</strong> = da última entrada com custo informado</span>
       </div>
 
       {/* TABELA */}
@@ -279,18 +280,19 @@ export default function EstoquePage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                {['SKU Base', 'Produto', 'Hist. Compra', 'Consumo Vendas', 'Estoque Real', 'Mínimo', 'Status', 'Ações'].map(h => (
-                  <th key={h} style={{ ...S.th, textAlign: ['Hist. Compra','Consumo Vendas','Estoque Real','Mínimo','Status'].includes(h) ? 'center' as any : S.th.textAlign }}>{h}</th>
+                {['SKU Base', 'Produto', 'Hist. Compra', 'Consumo Vendas', 'Estoque Real', 'Custo Atual', 'Mínimo', 'Status', 'Ações'].map(h => (
+                  <th key={h} style={{ ...S.th, textAlign: ['Hist. Compra','Consumo Vendas','Estoque Real','Custo Atual','Mínimo','Status'].includes(h) ? 'center' as any : S.th.textAlign }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {lista.length === 0 ? (
-                <tr><td colSpan={8} style={{ ...S.td, textAlign: 'center', padding: '40px', color: '#55556a' }}>Nenhum produto encontrado</td></tr>
+                <tr><td colSpan={9} style={{ ...S.td, textAlign: 'center', padding: '40px', color: '#55556a' }}>Nenhum produto encontrado</td></tr>
               ) : lista.map(item => {
                 const histCompra  = historicoCompra[item.sku_base] || 0
                 const consumo     = consumoVendas[item.sku_base] || 0
                 const estoqueReal = histCompra - consumo
+                const custo       = custoAtualPorSku[item.sku_base] || 0
                 const low         = estoqueReal <= item.estoque_minimo
                 const empty       = estoqueReal <= 0
                 const isEdit      = editId === item.id
@@ -317,6 +319,12 @@ export default function EstoquePage() {
                     </td>
                     <td style={{ ...S.td, textAlign: 'center' }}>
                       <Badge v={estoqueReal} min={item.estoque_minimo} />
+                    </td>
+                    {/* Custo atual — da última entrada */}
+                    <td style={{ ...S.td, textAlign: 'center' }}>
+                      {custo > 0
+                        ? <span style={{ background: '#0ea5e922', color: '#0ea5e9', border: '1px solid #0ea5e944', borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>{R(custo)}</span>
+                        : <span style={{ color: '#33334a', fontSize: 11 }}>—</span>}
                     </td>
                     <td style={{ ...S.td, textAlign: 'center', color: '#55556a' }}>
                       {isEdit
@@ -380,7 +388,7 @@ export default function EstoquePage() {
         </Modal>
       )}
 
-      {/* Modal Entrada de Compra */}
+      {/* Modal Entrada de Compra — com campo custo_unitario */}
       {showMov && (
         <Modal onClose={() => setShowMov(false)}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -402,28 +410,47 @@ export default function EstoquePage() {
                 {items.map(i => <option key={i.id} value={i.sku_base}>{i.produto} ({i.sku_base})</option>)}
               </select>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={S.label}>{mov.tipo === 'AJUSTE' ? 'Novo Estoque Total' : 'Quantidade Comprada'}</label>
+                <input type="number" value={mov.quantidade || ''} onChange={e => setMov({ ...mov, quantidade: +e.target.value })} style={S.inp} min="0" />
+              </div>
+              {mov.tipo === 'ENTRADA' && (
+                <div>
+                  <label style={S.label}>Custo Unitário (R$) *</label>
+                  <input type="number" step="0.01" min="0" value={mov.custo_unitario || ''}
+                    onChange={e => setMov({ ...mov, custo_unitario: +e.target.value })}
+                    placeholder="ex: 6,20" style={{ ...S.inp, borderColor: '#0ea5e944' }} />
+                </div>
+              )}
+            </div>
+            {/* Dica sobre custo */}
+            {mov.tipo === 'ENTRADA' && (
+              <div style={{ background: '#0ea5e912', border: '1px solid #0ea5e933', borderRadius: 8, padding: '8px 12px', fontSize: 11, color: '#0ea5e9' }}>
+                💡 O custo informado aqui será usado para calcular a margem de lucro de todas as vendas realizadas <strong>a partir desta data</strong>.
+              </div>
+            )}
             <div>
-              <label style={S.label}>{mov.tipo === 'AJUSTE' ? 'Novo Estoque Total (absoluto)' : 'Quantidade Comprada'}</label>
-              <input type="number" value={mov.quantidade || ''} onChange={e => setMov({ ...mov, quantidade: +e.target.value })} style={S.inp} min="0" />
+              <label style={S.label}>Data da Entrada</label>
+              <input type="date" value={mov.data} onChange={e => setMov({ ...mov, data: e.target.value })} style={S.inp} />
             </div>
             <div>
               <label style={S.label}>Observação</label>
               <input value={mov.observacao} onChange={e => setMov({ ...mov, observacao: e.target.value })} placeholder="Ex: Compra fornecedor XYZ..." style={S.inp} />
             </div>
 
-            {/* Preview do resultado */}
+            {/* Preview */}
             {mov.sku_base && mov.quantidade > 0 && (
               <div style={{ background: '#0f1a0f', border: '1px solid #22c55e33', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
                 {mov.tipo === 'ENTRADA' ? (
                   <>
                     <span style={{ color: '#55556a' }}>Novo histórico: </span>
-                    <strong style={{ color: '#22c55e' }}>
-                      {N((historicoCompra[mov.sku_base] || 0) + mov.quantidade)} un
-                    </strong>
+                    <strong style={{ color: '#22c55e' }}>{N((historicoCompra[mov.sku_base] || 0) + mov.quantidade)} un</strong>
                     <span style={{ color: '#55556a' }}> → Estoque real: </span>
-                    <strong style={{ color: '#22c55e' }}>
-                      {N((historicoCompra[mov.sku_base] || 0) + mov.quantidade - (consumoVendas[mov.sku_base] || 0))} un
-                    </strong>
+                    <strong style={{ color: '#22c55e' }}>{N((historicoCompra[mov.sku_base] || 0) + mov.quantidade - (consumoVendas[mov.sku_base] || 0))} un</strong>
+                    {mov.custo_unitario > 0 && (
+                      <> · <span style={{ color: '#0ea5e9' }}>Custo: {R(mov.custo_unitario)}/un</span></>
+                    )}
                   </>
                 ) : (
                   <>
@@ -450,7 +477,7 @@ export default function EstoquePage() {
             <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16 }}>Zerar Estoque</h3>
           </div>
           <p style={{ fontSize: 13, color: '#9090aa', marginBottom: 8 }}>
-            Isso vai <strong style={{ color: '#e2e2f0' }}>zerar</strong> o estoque atual e apagar o histórico de movimentações. Os produtos não serão excluídos.
+            Isso vai <strong style={{ color: '#e2e2f0' }}>zerar</strong> o estoque atual e apagar o histórico de movimentações.
           </p>
           <p style={{ fontSize: 12, color: '#ef4444', marginBottom: 20 }}>Esta ação não pode ser desfeita.</p>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -465,84 +492,81 @@ export default function EstoquePage() {
       {/* MODAL HISTÓRICO DE ENTRADAS */}
       {showHist && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}>
-          <div style={{ ...S.card, width: '100%', maxWidth: 780, maxHeight: '85vh', display: 'flex', flexDirection: 'column', padding: '24px 28px' }}>
-            {/* Header do modal */}
+          <div style={{ ...S.card, width: '100%', maxWidth: 860, maxHeight: '85vh', display: 'flex', flexDirection: 'column', padding: '24px 28px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexShrink: 0 }}>
               <div>
                 <h3 style={{ margin: 0, fontWeight: 800, fontSize: 16, color: '#e8e8f8' }}>📋 Histórico de Entradas</h3>
-                <div style={{ fontSize: 11, color: '#55556a', marginTop: 3 }}>{histEntradas.length} registros · clique em ✏️ para editar</div>
+                <div style={{ fontSize: 11, color: '#55556a', marginTop: 3 }}>{histEntradas.length} registros · custo por entrada define o preço usado nas vendas posteriores</div>
               </div>
               <button onClick={() => { setShowHist(false); setEditMovId(null) }}
                 style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 22, lineHeight: 1 }}>✕</button>
             </div>
-
-            {/* Tabela scrollável */}
             <div style={{ overflowY: 'auto', flex: 1 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr>
-                    {['Data', 'Produto (SKU Base)', 'Quantidade', 'Observação', 'Ações'].map(h => (
+                    {['Data', 'Produto (SKU)', 'Quantidade', 'Custo Unit.', 'Observação', 'Ações'].map(h => (
                       <th key={h} style={{ ...S.th, position: 'sticky' as any, top: 0, zIndex: 1 }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {histEntradas.length === 0 ? (
-                    <tr><td colSpan={5} style={{ ...S.td, textAlign: 'center', padding: 40, color: '#55556a' }}>
+                    <tr><td colSpan={6} style={{ ...S.td, textAlign: 'center', padding: 40, color: '#55556a' }}>
                       Nenhuma entrada registrada ainda
                     </td></tr>
                   ) : histEntradas.map(m => {
-                    const isEdit = editMovId === m.id
+                    const isEdit  = editMovId === m.id
                     const nomeProd = items.find(i => i.sku_base === m.sku_base)?.produto || m.sku_base
                     return (
                       <tr key={m.id} style={{ borderBottom: '1px solid #1a1a26', background: isEdit ? '#13131e' : 'transparent' }}>
-                        {/* Data */}
                         <td style={{ ...S.td, whiteSpace: 'nowrap' as any }}>
                           {isEdit
                             ? <input type="date" value={editMovVals.data || ''} onChange={e => setEditMovVals(v => ({ ...v, data: e.target.value }))}
                                 style={{ ...S.inp, width: 140, padding: '4px 8px', fontSize: 12 }} />
                             : <span style={{ fontFamily: 'monospace', color: '#9090aa' }}>
                                 {m.data ? m.data.slice(8,10)+'/'+m.data.slice(5,7)+'/'+m.data.slice(0,4) : '—'}
-                              </span>
-                          }
+                              </span>}
                         </td>
-                        {/* Produto */}
                         <td style={S.td}>
                           <div style={{ fontFamily: 'monospace', color: '#ff6600', fontSize: 11, fontWeight: 700 }}>{m.sku_base}</div>
                           <div style={{ fontSize: 11, color: '#55556a' }}>{nomeProd}</div>
                         </td>
-                        {/* Quantidade */}
                         <td style={{ ...S.td, whiteSpace: 'nowrap' as any }}>
                           {isEdit
                             ? <input type="number" min={1} value={editMovVals.quantidade || ''} onChange={e => setEditMovVals(v => ({ ...v, quantidade: +e.target.value }))}
                                 style={{ ...S.inp, width: 90, padding: '4px 8px', fontSize: 12 }} />
                             : <span style={{ background: '#a78bfa22', color: '#a78bfa', border: '1px solid #a78bfa44', borderRadius: 5, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
                                 {N(m.quantidade)} un
-                              </span>
-                          }
+                              </span>}
                         </td>
-                        {/* Observação */}
+                        <td style={{ ...S.td, whiteSpace: 'nowrap' as any }}>
+                          {isEdit
+                            ? <input type="number" step="0.01" min={0} value={editMovVals.custo_unitario || ''} onChange={e => setEditMovVals(v => ({ ...v, custo_unitario: +e.target.value }))}
+                                style={{ ...S.inp, width: 100, padding: '4px 8px', fontSize: 12 }} />
+                            : <span style={{ fontFamily: 'monospace', fontWeight: 700, color: (m.custo_unitario || 0) > 0 ? '#0ea5e9' : '#ef4444' }}>
+                                {(m.custo_unitario || 0) > 0 ? R(m.custo_unitario!) : '⚠️ Sem custo'}
+                              </span>}
+                        </td>
                         <td style={{ ...S.td, maxWidth: 200 }}>
                           {isEdit
                             ? <input value={editMovVals.observacao || ''} onChange={e => setEditMovVals(v => ({ ...v, observacao: e.target.value }))}
-                                placeholder="Observação..." style={{ ...S.inp, padding: '4px 8px', fontSize: 12 }} />
-                            : <span style={{ color: '#55556a', fontSize: 12 }}>{m.observacao || '—'}</span>
-                          }
+                                style={{ ...S.inp, padding: '4px 8px', fontSize: 12 }} />
+                            : <span style={{ color: '#55556a', fontSize: 12 }}>{m.observacao || '—'}</span>}
                         </td>
-                        {/* Ações */}
                         <td style={{ ...S.td, textAlign: 'center' as any }}>
                           <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                             {isEdit ? (
                               <>
                                 <button onClick={salvarEditMov} disabled={savingMov}
                                   style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                                  {savingMov ? '...' : '✓ Salvar'}
+                                  {savingMov ? '...' : '✓'}
                                 </button>
                                 <button onClick={() => setEditMovId(null)} style={{ ...S.btnGhost, padding: '5px 10px' }}>✕</button>
                               </>
                             ) : (
                               <>
-                                <button onClick={() => { setEditMovId(m.id); setEditMovVals({ data: m.data, quantidade: m.quantidade, observacao: m.observacao || '' }) }}
+                                <button onClick={() => { setEditMovId(m.id); setEditMovVals({ data: m.data, quantidade: m.quantidade, custo_unitario: m.custo_unitario || 0, observacao: m.observacao || '' }) }}
                                   style={{ ...S.btnGhost, padding: '5px 10px', fontSize: 13 }}>✏️</button>
                                 <button onClick={() => deletarEntrada(m.id)}
                                   style={{ background: '#ef444412', color: '#ef4444', border: '1px solid #ef444425', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 13 }}>✕</button>
@@ -556,8 +580,6 @@ export default function EstoquePage() {
                 </tbody>
               </table>
             </div>
-
-            {/* Footer */}
             <div style={{ paddingTop: 14, borderTop: '1px solid #1e1e2c', flexShrink: 0, marginTop: 8 }}>
               <button onClick={() => { setShowHist(false); setEditMovId(null) }} style={{ ...S.btnGhost }}>Fechar</button>
             </div>
