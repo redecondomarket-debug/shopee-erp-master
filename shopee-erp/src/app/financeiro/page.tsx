@@ -6,7 +6,6 @@ import * as XLSX from 'xlsx'
 
 const LOJAS = ['KL MARKET', 'UNIVERSO DOS ACHADOS', 'MUNDO DOS ACHADOS']
 
-// Famílias de produto (hardcoded)
 const SKU_FAMILIA: Record<string, string> = {
   FM50: 'Formas', FM100: 'Formas', FM200: 'Formas', FM300: 'Formas',
   KIT2TP: 'Tapetes', KIT3TP: 'Tapetes', KIT4TP: 'Tapetes',
@@ -73,15 +72,6 @@ function Toast({ msg, type, onClose }: { msg: string; type: string; onClose: () 
   )
 }
 
-function calcLinha(recBruta: number, custoProd: number, imposto: number) {
-  const taxaShopee = recBruta * TAXA_SHOPEE
-  const imp        = recBruta * imposto
-  const custoTotal = taxaShopee + custoProd + imp
-  const lucroOp    = recBruta - custoTotal
-  const margem     = recBruta > 0 ? lucroOp / recBruta : 0
-  return { taxaShopee, imp, custoTotal, lucroOp, margem }
-}
-
 function parseShopeeRow(row: Record<string, any>): any | null {
   const numPedido = String(row['Order ID'] || row['ID do pedido'] || row['No. Pesanan'] || '').trim()
   const status    = String(row['Order Status'] || row['Status do pedido'] || row['Status Pesanan'] || '').trim()
@@ -133,6 +123,7 @@ export default function FinanceiroPage() {
   const [rows,       setRows]       = useState<any[]>([])
   const [skuMap,     setSkuMap]     = useState<any[]>([])
   const [estoque,    setEstoque]    = useState<any[]>([])
+  const [movimentos, setMovimentos] = useState<any[]>([])  // ← NOVO: armazenar movimentações
   const [loading,    setLoading]    = useState(true)
   const [saving,     setSaving]     = useState(false)
   const [toast,      setToast]      = useState<{ msg: string; type: string } | null>(null)
@@ -147,7 +138,6 @@ export default function FinanceiroPage() {
   const [familiaFiltro, setFamiliaFiltro] = useState('Todas')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // FIX: hook centralizado — mesmo valor do DRE e demais páginas
   const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   const [form, setForm] = useState({
@@ -159,27 +149,49 @@ export default function FinanceiroPage() {
 
   async function loadData() {
     setLoading(true)
-    const [finRes, mapRes, estRes] = await Promise.all([
+    const [finRes, mapRes, estRes, movRes] = await Promise.all([
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('sku_map').select('*'),
       supabase.from('estoque').select('*'),
+      supabase.from('movimentacoes').select('*'),  // ← NOVO: buscar movimentações
     ])
     setRows(finRes.data || [])
     setSkuMap(mapRes.data || [])
     setEstoque(estRes.data || [])
+    setMovimentos(movRes.data || [])  // ← NOVO: armazenar
     setLoading(false)
   }
 
-  function calcCustoProduto(skuVendido: string, quantidade: number): number {
-    if (!skuVendido) return 0
+  // 🔴 NOVO: Buscar custo histórico por SKU base e data
+  function obterCustoHistorico(skuBase: string, dataPedido: string): number {
+    // Busca a última ENTRADA com data <= dataPedido e custo_unitario > 0
+    const entradas = movimentos.filter(m =>
+      m.sku_base === skuBase &&
+      m.tipo === 'ENTRADA' &&
+      (m.custo_unitario || 0) > 0 &&
+      (m.data || '') <= dataPedido
+    )
+    if (entradas.length === 0) {
+      // Se não houver entrada anterior, retorna o custo base do cadastro
+      const prod = estoque.find(e => e.sku_base === skuBase)
+      return prod?.custo || 0
+    }
+    // Ordena por data DESC e pega o mais recente (primeiro)
+    entradas.sort((a, b) => (b.data || '').localeCompare(a.data || ''))
+    return entradas[0].custo_unitario || 0
+  }
+
+  function calcCustoProduto(skuVendido: string, quantidade: number, dataPedido: string): number {
+    if (!skuVendido || !dataPedido) return 0
     const componentes = skuMap.filter(m => m.sku_venda === skuVendido)
     if (!componentes.length) return 0
+    
     const custoProd = componentes.reduce((total, comp) => {
-      const prod = estoque.find(e => e.sku_base === comp.sku_base)
-      if (!prod) return total
-      return total + (prod.custo || 0) * (comp.quantidade || 1) * quantidade
+      const custoHistorico = obterCustoHistorico(comp.sku_base, dataPedido)  // ← NOVO: usar custo histórico
+      return total + (custoHistorico || 0) * (comp.quantidade || 1) * quantidade
     }, 0)
-    // custo_embalagem é cadastrado separado do custo unitário (ver aba Produtos Base)
+    
+    // custo_embalagem do cadastro base (pode ser customizado depois)
     const primeiroComp = componentes[0]
     const prodPrincipal = estoque.find(e => e.sku_base === primeiroComp?.sku_base)
     return custoProd + (prodPrincipal?.custo_embalagem || 0)
@@ -270,7 +282,6 @@ export default function FinanceiroPage() {
     if (filterLoja !== 'Todas' && r.loja !== filterLoja) return false
     if (dateFrom && r.data < dateFrom) return false
     if (dateTo   && r.data > dateTo)   return false
-    // Busca por ID do pedido ou SKU
     if (buscaPedido && !String(r.pedido || '').toLowerCase().includes(buscaPedido.toLowerCase())
                     && !String(r.sku    || '').toLowerCase().includes(buscaPedido.toLowerCase())) return false
     if (familiaFiltro !== 'Todas') {
@@ -283,14 +294,14 @@ export default function FinanceiroPage() {
     const taxaShopee = (r.comissao_shopee && r.comissao_shopee > 0)
       ? r.comissao_shopee
       : recBruta * TAXA_SHOPEE
-    const cProd      = calcCustoProduto(r.sku || '', r.quantidade || 1)
-    // FIX: imposto do hook, não hardcoded
+    // 🔴 CRÍTICO: passar dataPedido (r.data) para obter custo histórico correto
+    const cProd      = calcCustoProduto(r.sku || '', r.quantidade || 1, r.data || '')
     const imp        = recBruta * imposto
     const custoTotal = taxaShopee + cProd + imp
     const lucroOp    = recBruta - custoTotal
     const margem     = recBruta > 0 ? lucroOp / recBruta : 0
     return { ...r, recBruta, taxaShopee, custoProd: cProd, imp, custoTotal, lucroOp, margem }
-  }), [rows, skuMap, estoque, filterLoja, dateFrom, dateTo, imposto, buscaPedido, familiaFiltro])
+  }), [rows, skuMap, estoque, movimentos, filterLoja, dateFrom, dateTo, imposto, buscaPedido, familiaFiltro])  // ← NOVO: adicionar movimentos às dependências
 
   const totRec  = filtered.reduce((s, r) => s + r.recBruta, 0)
   const totLuc  = filtered.reduce((s, r) => s + r.lucroOp, 0)
@@ -334,7 +345,6 @@ export default function FinanceiroPage() {
           {LOJAS.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
 
-        {/* Filtro de família */}
         <div style={{ display: 'flex', gap: 4 }}>
           {FAMILIAS_LISTA.map(f => {
             const ativo = familiaFiltro === f
@@ -360,7 +370,6 @@ export default function FinanceiroPage() {
           <span style={{ color: '#555', fontSize: 12 }}>até</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ ...S.inp, width: 150 } as any} />
         </>}
-        {/* Busca por ID do pedido ou SKU */}
         <div style={{ position: 'relative' as any, display: 'flex', alignItems: 'center' }}>
           <span style={{ position: 'absolute' as any, left: 10, fontSize: 13, color: '#55556a' }}>🔍</span>
           <input
@@ -388,20 +397,19 @@ export default function FinanceiroPage() {
                 <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
                   style={{ ...S.inp, width: 80 } as any} step="0.1" min="0" max="50" />
                 <span style={{ fontSize: 12, color: '#55556a' }}>%</span>
-                {/* FIX: salvarImposto do hook garante persistência e sync entre páginas */}
                 <button onClick={() => { salvarImposto(); showToast('Imposto salvo: ' + impostoInput + '%') }}
                   style={{ background: '#22c55e22', color: '#22c55e', border: '1px solid #22c55e44', borderRadius: 7, padding: '6px 14px', cursor: 'pointer', fontWeight: 700, fontSize: 12 }}>
                   ✓ Salvar
                 </button>
               </div>
             </div>
-            <div>
-              <label style={S.label}>Custo Embalagem Adicional (R$/pedido)</label>
-              <input type="number" value={0} disabled style={{ ...S.inp, width: 120 } as any} step="0.01" min="0" />
-            </div>
             <div style={{ fontSize: 11, color: '#555', padding: '8px 12px', background: '#13131e', borderRadius: 6 }}>
               <div>Taxa Shopee: <strong style={{ color: '#ff9933' }}>20%</strong></div>
               <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>Taxa fixa inclusa na coluna Taxa Shop do Excel</div>
+            </div>
+            <div style={{ fontSize: 11, color: '#0ea5e9', padding: '8px 12px', background: '#0f1a2a', borderRadius: 6 }}>
+              <div>🔴 <strong>CUSTO HISTÓRICO ATIVO</strong></div>
+              <div style={{ fontSize: 10, color: '#0ea5e9', marginTop: 4 }}>Usa custos lançados na aba Estoque por data</div>
             </div>
           </div>
         </div>
