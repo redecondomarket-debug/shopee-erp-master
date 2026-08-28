@@ -70,17 +70,11 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   const iW    = W - PL - PR
   const iH    = H - PT - PB
   const n     = data.length
-
-  // Largura da barra com espaço mínimo garantido entre elas
-  // Espaço entre barras = 40% do slot; barra = 60%
   const slotW = iW / n
   const bW    = Math.max(4, Math.min(26, slotW * 0.60))
-
   const xc    = (i: number) => PL + (i + 0.5) * slotW
   const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => ({ v: max * p, y: PT + iH * (1 - p) }))
   const fmtV  = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
-
-  // Com muitos dias: alternar rótulos (par/ímpar) para evitar sobreposição
   const mostrarLabel = (i: number) => n <= 20 || i % 2 === 0
 
   return (
@@ -95,7 +89,6 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
         const bh = Math.max((d.v / max) * iH, 1)
         const bx = xc(i) - bW / 2
         const by = PT + iH - bh
-        // Rótulo do valor: só mostra se a barra tiver largura suficiente
         const showVal = bW >= 8
         return (
           <g key={i}>
@@ -118,111 +111,71 @@ function GraficoDia({ data }: { data: { l: string; v: number }[] }) {
   )
 }
 
-// ── Gráfico barras por mês + linha % variação (faixas fixas separadas) ──────
+// ── Gráfico barras por mês + linha % variação ──────────────────────────────
 function GraficoMes({ data }: { data: { l: string; v: number; var: number | null }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados</div>
-
-  // SVG dividido em 2 faixas fixas — linha SEMPRE acima, barras SEMPRE abaixo
-  // Faixa LINHA: y 18..88  (altura 70px) — escala própria de %
-  // Separador:   y 96
-  // Faixa BARRA: y 110..244 (altura 134px) — escala de R$
   const W = 760, H = 280
   const PL = 62, PR = 20, PB = 36
-
-  const L_TOP = 18,  L_BOT = 88   // faixa da linha de %
-  const B_TOP = 110, B_BOT = H - PB  // faixa das barras
+  const L_TOP = 18,  L_BOT = 88
+  const B_TOP = 110, B_BOT = H - PB
   const L_H = L_BOT - L_TOP
   const B_H = B_BOT - B_TOP
-
   const iW = W - PL - PR
   const n  = data.length
   const bW = Math.max(24, iW / n - 10)
   const xc = (i: number) => PL + (i + 0.5) * (iW / n)
   const max = Math.max(...data.map(d => d.v), 1)
-
-  // Escala da linha: min..max das variações com margem de 10%
   const vars = data.map(d => d.var).filter(v => v !== null) as number[]
   const vRaw = vars.length ? vars : [0]
   const vPad = Math.max((Math.max(...vRaw) - Math.min(...vRaw)) * 0.15, 10)
   const vMin = Math.min(...vRaw) - vPad
   const vMax = Math.max(...vRaw) + vPad
   const vRng = Math.max(vMax - vMin, 1)
-
-  // yLn: posição Y DENTRO da faixa L_TOP..L_BOT
   const yLn = (v: number) => L_TOP + L_H * (1 - (v - vMin) / vRng)
-
   const pts = data
     .map((d, i) => d.var !== null ? `${xc(i)},${yLn(d.var!)}` : null)
     .filter(Boolean).join(' ')
-
   const fmtV = (v: number) => v >= 1000 ? `R$${(v/1000).toFixed(1)}k` : `R$${v.toFixed(0)}`
   const barTicks = [0, 0.5, 1].map(p => ({ v: max * p, y: B_BOT - B_H * p }))
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
-
-      {/* Linha divisória entre as duas faixas */}
-      <line x1={PL} x2={W - PR} y1={96} y2={96}
-        stroke="#2a2a3a" strokeWidth={1} strokeDasharray="5,4" />
-
-      {/* Eixo Y das barras */}
+      <line x1={PL} x2={W - PR} y1={96} y2={96} stroke="#2a2a3a" strokeWidth={1} strokeDasharray="5,4" />
       {barTicks.map((t, i) => (
         <g key={i}>
-          <line x1={PL} x2={W - PR} y1={t.y} y2={t.y}
-            stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,5" />
-          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">
-            {fmtV(t.v)}
-          </text>
+          <line x1={PL} x2={W - PR} y1={t.y} y2={t.y} stroke="#1e1e2c" strokeWidth={1} strokeDasharray="2,5" />
+          <text x={PL - 6} y={t.y + 4} textAnchor="end" fontSize={9} fill="#44445a">{fmtV(t.v)}</text>
         </g>
       ))}
-
-      {/* Barras */}
       {data.map((d, i) => {
         const bh = Math.max((d.v / max) * B_H, 2)
         const bx = xc(i) - bW / 2
         const by = B_BOT - bh
         return (
           <g key={i}>
-            <rect x={bx} y={by} width={bW} height={bh} rx={4}
-              fill="#1a4a8a" fillOpacity={0.92} />
-            <text x={xc(i)} y={by - 5} textAnchor="middle"
-              fontSize={9.5} fill="#5599ff" fontWeight="700">
-              {fmtV(d.v)}
-            </text>
-            <text x={xc(i)} y={H - PB + 14} textAnchor="middle"
-              fontSize={11} fill="#9090aa" fontWeight="600">
-              {d.l}
-            </text>
+            <rect x={bx} y={by} width={bW} height={bh} rx={4} fill="#1a4a8a" fillOpacity={0.92} />
+            <text x={xc(i)} y={by - 5} textAnchor="middle" fontSize={9.5} fill="#5599ff" fontWeight="700">{fmtV(d.v)}</text>
+            <text x={xc(i)} y={H - PB + 14} textAnchor="middle" fontSize={11} fill="#9090aa" fontWeight="600">{d.l}</text>
           </g>
         )
       })}
-
-      {/* Linha de variação — restrita à faixa L_TOP..L_BOT */}
       {pts && (
-        <polyline points={pts} fill="none" stroke="#22c55e"
-          strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+        <polyline points={pts} fill="none" stroke="#22c55e" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
       )}
-
-      {/* Pontos + rótulos da % — sempre dentro da faixa de linha */}
       {data.map((d, i) => {
         if (d.var === null) return null
-        const cy  = yLn(d.var)   // y garantido entre L_TOP e L_BOT
+        const cy  = yLn(d.var)
         const cor = d.var >= 0 ? '#22c55e' : '#ef4444'
-        // Rótulo: acima do ponto se tiver espaço, senão abaixo
         const lblY = cy - L_TOP > 16 ? cy - 8 : cy + 17
         return (
           <g key={`v${i}`}>
-            <circle cx={xc(i)} cy={cy} r={5} fill={cor}
-              stroke="#16161f" strokeWidth={2} />
-            <text x={xc(i)} y={lblY} textAnchor="middle"
-              fontSize={10} fill={cor} fontWeight="800">
+            <circle cx={xc(i)} cy={cy} r={5} fill={cor} stroke="#16161f" strokeWidth={2} />
+            <text x={xc(i)} y={lblY} textAnchor="middle" fontSize={10} fill={cor} fontWeight="800">
               {d.var >= 0 ? '+' : ''}{d.var.toFixed(1)}%
             </text>
           </g>
         )
       })}
-
-
     </svg>
   )
 }
@@ -276,8 +229,7 @@ function GraficoPizza({ fatias }: { fatias: { label: string; v: number; color: s
   )
 }
 
-
-// ── Gráfico Ads por Mês (mesmo padrão do faturamento) ────────────────────────
+// ── Gráfico Ads por Mês ───────────────────────────────────────────────────
 function GraficoAdsMes({ data }: { data: { l: string; v: number; var: number | null }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados de Ads</div>
   const W = 760, H = 280, PL = 62, PR = 20, PB = 36
@@ -331,12 +283,11 @@ function GraficoAdsMes({ data }: { data: { l: string; v: number; var: number | n
           </g>
         )
       })}
-
     </svg>
   )
 }
 
-// ── Gráfico Faturamento vs Ads (barras duplas + linha ROAS) ───────────────────
+// ── Gráfico Faturamento vs Ads ────────────────────────────────────────────────
 function GraficoFatVsAds({ data }: { data: { l: string; fat: number; ads: number; roas: number }[] }) {
   if (!data.length) return <div style={{ color: '#555', textAlign: 'center', padding: 40 }}>Sem dados</div>
   const W = 760, H = 280, PL = 62, PR = 20, PB = 36
@@ -402,7 +353,6 @@ function GraficoFatVsAds({ data }: { data: { l: string; fat: number; ads: number
           </g>
         )
       })}
-
     </svg>
   )
 }
@@ -412,6 +362,7 @@ export default function DashboardPage() {
   const [ads,        setAds]        = useState<any[]>([])
   const [estoque,    setEstoque]    = useState<any[]>([])
   const [skuMapData, setSkuMapData] = useState<any[]>([])
+  const [movimentos, setMovimentos] = useState<any[]>([])  // ← NOVO
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
@@ -427,16 +378,18 @@ export default function DashboardPage() {
 
   async function loadData() {
     setLoading(true)
-    const [finRes, adsRes, estRes, mapRes] = await Promise.all([
+    const [finRes, adsRes, estRes, mapRes, movRes] = await Promise.all([  // ← NOVO: movRes
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('ads').select('*').order('data', { ascending: false }),
       supabase.from('estoque').select('*'),
       supabase.from('sku_map').select('*'),
+      supabase.from('movimentacoes').select('*'),  // ← NOVO
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
     setEstoque(estRes.data || [])
     setSkuMapData(mapRes.data || [])
+    setMovimentos(movRes.data || [])  // ← NOVO
     setLoading(false)
   }
 
@@ -451,13 +404,30 @@ export default function DashboardPage() {
     else if (p === 'tudo')   { setDateFrom(''); setDateTo('') }
   }
 
-  function calcCustoProd(skuVendido: string, quantidade: number): number {
-    if (!skuVendido) return 0
+  // 🔴 NOVO: Função para obter custo histórico
+  function obterCustoHistorico(skuBase: string, dataPedido: string): number {
+    const entradas = movimentos.filter(m =>
+      m.sku_base === skuBase &&
+      m.tipo === 'ENTRADA' &&
+      (m.custo_unitario || 0) > 0 &&
+      (m.data || '') <= dataPedido
+    )
+    if (entradas.length === 0) {
+      const prod = estoque.find(e => e.sku_base === skuBase)
+      return prod?.custo || 0
+    }
+    entradas.sort((a, b) => (b.data || '').localeCompare(a.data || ''))
+    return entradas[0].custo_unitario || 0
+  }
+
+  // 🔴 MODIFICADO: agora recebe dataPedido
+  function calcCustoProd(skuVendido: string, quantidade: number, dataPedido: string): number {
+    if (!skuVendido || !dataPedido) return 0
     const comps = skuMapData.filter(m => m.sku_venda === skuVendido)
     if (!comps.length) return 0
     const custoProd = comps.reduce((t, c) => {
-      const prod = estoque.find(e => e.sku_base === c.sku_base)
-      return t + (prod?.custo || 0) * (c.quantidade || 1) * quantidade
+      const custoHistorico = obterCustoHistorico(c.sku_base, dataPedido)  // ← NOVO
+      return t + (custoHistorico || 0) * (c.quantidade || 1) * quantidade
     }, 0)
     const prodPrincipal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
     return custoProd + (prodPrincipal?.custo_embalagem || 0)
@@ -480,13 +450,12 @@ export default function DashboardPage() {
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const totalRec   = finF.reduce((s, f) => s + (f.valor_bruto || 0), 0)
   const totalTaxas = finF.reduce((s, f) => s + ((f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE), 0)
-  const totalCprod = finF.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
+  // 🔴 MODIFICADO: agora passa f.data
+  const totalCprod = finF.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1, f.data || ''), 0)
   const totalImp   = totalRec * imposto
   const totalAds   = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
-  // MC inclui imposto e ads como custos variáveis
   const totalMC    = totalRec - totalTaxas - totalCprod - totalImp - totalAds
   const mcPct      = totalRec > 0 ? totalMC / totalRec : 0
-  // Lucro Op e Lucro Líq = MC (já inclui tudo)
   const totalLucOp = totalMC
   const lucroLiq   = totalMC
   const margemLiq  = totalRec > 0 ? lucroLiq / totalRec : 0
@@ -499,7 +468,8 @@ export default function DashboardPage() {
     const lp    = finF.filter(f => f.loja === loja)
     const rec   = lp.reduce((s, f) => s + (f.valor_bruto || 0), 0)
     const taxas = lp.reduce((s, f) => s + ((f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : (f.valor_bruto || 0) * TAXA_SHOPEE), 0)
-    const cprod = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1), 0)
+    // 🔴 MODIFICADO: agora passa f.data
+    const cprod = lp.reduce((s, f) => s + calcCustoProd(f.sku || '', f.quantidade || 1, f.data || ''), 0)
     const imp   = rec * imposto
     const gads  = adsF.filter(a => a.loja === loja).reduce((s, a) => s + (a.investimento || 0), 0)
     const mc    = rec - taxas - cprod - imp - gads
@@ -515,7 +485,8 @@ export default function DashboardPage() {
     if (!skuAgg[sku]) skuAgg[sku] = { sku, nome: f.produto || sku, rec: 0, lucro: 0, qtd: 0 }
     const rec_s   = f.valor_bruto || 0
     const taxas_s = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : rec_s * TAXA_SHOPEE
-    const cprod_s = calcCustoProd(f.sku || '', f.quantidade || 1)
+    // 🔴 MODIFICADO: agora passa f.data
+    const cprod_s = calcCustoProd(f.sku || '', f.quantidade || 1, f.data || '')
     const imp_s   = rec_s * imposto
     skuAgg[sku].rec   += rec_s
     skuAgg[sku].lucro += rec_s - taxas_s - cprod_s - imp_s
@@ -524,7 +495,7 @@ export default function DashboardPage() {
   const topSkus  = Object.values(skuAgg).sort((a: any, b: any) => b.rec - a.rec).slice(0, 8)
   const totalQtd = finF.reduce((s, f) => s + (f.quantidade || 1), 0)
 
-  // ── Gráfico por dia — filtro próprio (independente do filtro geral) ─────────
+  // ── Gráfico por dia ────────────────────────────────────────────────────────
   const dayChartData = useMemo(() => {
     const hoje   = new Date()
     const fmt    = (d: Date) => d.toISOString().slice(0, 10)
@@ -553,7 +524,7 @@ export default function DashboardPage() {
   }, [financeiro, lojaFiltro, periodoGrafDia, grafDiaFrom, grafDiaTo])
   const dayChart = dayChartData.entries
 
-  // ── Gráfico por mês (histórico completo, sem filtro de data) ──────────────
+  // ── Gráfico por mês ───────────────────────────────────────────────────────
   const byMes: Record<string, number> = {}
   financeiro.filter(f => lojaFiltro === 'Todas' || f.loja === lojaFiltro).forEach(f => {
     if (!f.data) return
@@ -567,7 +538,7 @@ export default function DashboardPage() {
     return { l: `${MESES[+mes-1]}/${ano.slice(2)}`, v, var: varPct }
   })
 
-  // ── Pizza produtos (por produto base) ─────────────────────────────────────
+  // ── Pizza produtos ────────────────────────────────────────────────────────
   const skuParaBase: Record<string, string> = {}
   skuMapData.forEach(m => { if (!skuParaBase[m.sku_venda]) skuParaBase[m.sku_venda] = m.sku_base })
 
@@ -605,15 +576,13 @@ export default function DashboardPage() {
     return { loja, ticket: ped > 0 ? rec / ped : 0, peds: ped }
   }).filter(l => l.peds > 0)
 
-
-  // ── Gráfico Ads por mês (histórico completo) ─────────────────────────────
+  // ── Gráfico Ads por mês ───────────────────────────────────────────────────
   const byAds: Record<string, number> = {}
   ads.filter(a => lojaFiltro === 'Todas' || a.loja === lojaFiltro).forEach(a => {
     if (!a.data) return
     const key = a.data.slice(0, 7)
     byAds[key] = (byAds[key] || 0) + (a.investimento || 0)
   })
-  // Mesmas chaves que mesChart para alinhar meses
   const adsChart = Object.entries(byMes).sort(([a], [b]) => a.localeCompare(b)).map(([k], i, arr) => {
     const v    = byAds[k] || 0
     const prev = i > 0 ? (byAds[arr[i-1][0]] || 0) : null
@@ -622,7 +591,7 @@ export default function DashboardPage() {
     return { l: `${MESES[+mes-1]}/${ano.slice(2)}`, v, var: varPct }
   })
 
-  // ── Faturamento vs Ads por mês (barras duplas) ────────────────────────────
+  // ── Faturamento vs Ads por mês ────────────────────────────────────────────
   const fatVsAds = Object.entries(byMes).sort(([a], [b]) => a.localeCompare(b)).map(([k, fat]) => {
     const adsMes = byAds[k] || 0
     const roas   = adsMes > 0 ? fat / adsMes : 0
@@ -632,16 +601,6 @@ export default function DashboardPage() {
 
   // ── Heatmap dias da semana ────────────────────────────────────────────────
   const DIAS_SEMANA = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb']
-  const heatmap: Record<string, number> = {}
-  finF.forEach(f => {
-    if (!f.data) return
-    const d   = new Date(f.data + 'T12:00:00')
-    const dia = d.getDay() // 0=Dom..6=Sáb
-    const semKey = f.data.slice(0, 7) + '-S' + Math.ceil(d.getDate() / 7)
-    const key = `${dia}-${semKey}`
-    heatmap[key] = (heatmap[key] || 0) + (f.valor_bruto || 0)
-  })
-  // Agrupar por dia da semana: média de faturamento
   const mediaPorDia = DIAS_SEMANA.map((nome, idx) => {
     const vals = finF
       .filter(f => f.data && new Date(f.data + 'T12:00:00').getDay() === idx)
@@ -655,7 +614,7 @@ export default function DashboardPage() {
     return { nome, media, dias: dias.length }
   })
 
-  // ── Velocidade de venda por SKU (unidades/dia) ────────────────────────────
+  // ── Velocidade de venda por SKU ───────────────────────────────────────────
   const diasPeriodo = (() => {
     const datas = finF.map(f => f.data).filter(Boolean).sort()
     if (datas.length < 2) return 1
@@ -900,7 +859,6 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
-
 
       {/* GRÁFICO ADS POR MÊS */}
       <div style={{ ...S.card, marginBottom: 20 }}>
