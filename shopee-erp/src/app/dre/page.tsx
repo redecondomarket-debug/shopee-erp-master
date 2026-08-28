@@ -39,6 +39,7 @@ export default function DREPage() {
   const [ads,        setAds]        = useState<any[]>([])
   const [skuMap,     setSkuMap]     = useState<any[]>([])
   const [estoque,    setEstoque]    = useState<any[]>([])
+  const [movimentos, setMovimentos] = useState<any[]>([])  // ← NOVO
   const [loading,    setLoading]    = useState(true)
   const [lojaFiltro, setLojaFiltro] = useState('Todas')
   const [dateFrom,   setDateFrom]   = useState('')
@@ -47,23 +48,24 @@ export default function DREPage() {
   const [modo,       setModo]       = useState<'resumido' | 'porLoja'>('resumido')
   const [periodo,    setPeriodo]    = useState('personalizado')
 
-  // FIX: hook centralizado — mesmo valor do Financeiro e demais páginas
   const { imposto, impostoInput, setImpostoInput, salvarImposto } = useTaxRate()
 
   useEffect(() => { loadData() }, [])
 
   async function loadData() {
     setLoading(true)
-    const [finRes, adsRes, mapRes, estRes] = await Promise.all([
+    const [finRes, adsRes, mapRes, estRes, movRes] = await Promise.all([  // ← NOVO: movRes
       supabase.from('financeiro').select('*').order('data', { ascending: false }).limit(5000),
       supabase.from('ads').select('*').order('data', { ascending: false }),
       supabase.from('sku_map').select('*'),
       supabase.from('estoque').select('*'),
+      supabase.from('movimentacoes').select('*'),  // ← NOVO
     ])
     setFinanceiro(finRes.data || [])
     setAds(adsRes.data || [])
     setSkuMap(mapRes.data || [])
     setEstoque(estRes.data || [])
+    setMovimentos(movRes.data || [])  // ← NOVO
     setLoading(false)
   }
 
@@ -78,13 +80,30 @@ export default function DREPage() {
     else if (p === 'tudo') { setDateFrom(''); setDateTo('') }
   }
 
-  function calcCustoProd(skuVendido: string, quantidade: number): number {
-    if (!skuVendido) return 0
+  // 🔴 NOVO: Função para obter custo histórico (mesma do Financeiro)
+  function obterCustoHistorico(skuBase: string, dataPedido: string): number {
+    const entradas = movimentos.filter(m =>
+      m.sku_base === skuBase &&
+      m.tipo === 'ENTRADA' &&
+      (m.custo_unitario || 0) > 0 &&
+      (m.data || '') <= dataPedido
+    )
+    if (entradas.length === 0) {
+      const prod = estoque.find(e => e.sku_base === skuBase)
+      return prod?.custo || 0
+    }
+    entradas.sort((a, b) => (b.data || '').localeCompare(a.data || ''))
+    return entradas[0].custo_unitario || 0
+  }
+
+  // 🔴 MODIFICADO: agora recebe dataPedido
+  function calcCustoProd(skuVendido: string, quantidade: number, dataPedido: string): number {
+    if (!skuVendido || !dataPedido) return 0
     const comps = skuMap.filter(m => m.sku_venda === skuVendido)
     if (!comps.length) return 0
     const custoProd = comps.reduce((t, c) => {
-      const prod = estoque.find(e => e.sku_base === c.sku_base)
-      return t + (prod?.custo || 0) * (c.quantidade || 1) * quantidade
+      const custoHistorico = obterCustoHistorico(c.sku_base, dataPedido)  // ← NOVO
+      return t + (custoHistorico || 0) * (c.quantidade || 1) * quantidade
     }, 0)
     const prodPrincipal = estoque.find(e => e.sku_base === comps[0]?.sku_base)
     return custoProd + (prodPrincipal?.custo_embalagem || 0)
@@ -120,7 +139,8 @@ export default function DREPage() {
       }, 0)
       const cprod = lp.reduce((s, f) => {
         const sku  = f.sku || ''
-        const calc = calcCustoProd(sku, f.quantidade || 1)
+        // 🔴 MODIFICADO: agora passa f.data
+        const calc = calcCustoProd(sku, f.quantidade || 1, f.data || '')
         return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
       }, 0)
       const cemb = 0
@@ -129,7 +149,6 @@ export default function DREPage() {
         ? adsF.filter(a => a.data === data)
         : adsF.filter(a => a.data === data && a.loja === loja)
       ).reduce((s, a) => s + (a.investimento || 0), 0)
-      // MC inclui imposto e ads
       const mc    = rec - taxas - cprod - cemb - imp - gads
       const mcPct = rec > 0 ? mc / rec : 0
       const lucOp = mc
@@ -144,14 +163,14 @@ export default function DREPage() {
           const ts = (f.comissao_shopee && f.comissao_shopee > 0) ? f.comissao_shopee : rb * TAXA_SHOPEE
           return s + ts
         }, 0)
-        // FIX: imposto do hook
         const i2  = r2 * imposto
         const cp2 = lf.reduce((s, f) => {
           const sku  = f.sku || ''
-          const calc = calcCustoProd(sku, f.quantidade || 1)
+          // 🔴 MODIFICADO: agora passa f.data
+          const calc = calcCustoProd(sku, f.quantidade || 1, f.data || '')
           return s + ((f.custo_produto && f.custo_produto > 0) ? f.custo_produto : calc)
         }, 0)
-        const ce2 = 0 // embalagem já inclusa em calcCustoProd via estoque
+        const ce2 = 0
         const g2  = adsF.filter(a => a.data === data && a.loja === l).reduce((s, a) => s + (a.investimento || 0), 0)
         const mc2 = r2 - t2 - cp2 - ce2 - i2 - g2
         const lo2 = mc2
@@ -160,13 +179,11 @@ export default function DREPage() {
 
       return { data, loja, rec, taxas, cprod, cemb, imp, mc, mcPct, lucOp, gads, ll, peds, margem: rec > 0 ? ll / rec : 0, porLoja }
     })
-  }, [finF, adsF, skuMap, estoque, imposto, modo])
+  }, [finF, adsF, skuMap, estoque, movimentos, imposto, modo])  // ← NOVO: adicionar movimentos
 
   const tot = useMemo(() => {
     const t = { rec: 0, taxas: 0, cprod: 0, cemb: 0, imp: 0, mc: 0, lucOp: 0, gads: 0, ll: 0, peds: 0 }
     rows.forEach(r => Object.keys(t).forEach(k => (t as any)[k] += (r as any)[k] || 0))
-    // Recalcular MC e LL usando total real de ads do período
-    // Evita distorção quando ads não são lançados em todos os dias de venda
     const totalGads = adsF.reduce((s, a) => s + (a.investimento || 0), 0)
     const mcReal    = t.rec - t.taxas - t.cprod - t.cemb - t.imp - totalGads
     return { ...t, gads: totalGads, mc: mcReal, lucOp: mcReal, ll: mcReal, mcPct: t.rec > 0 ? mcReal / t.rec : 0 }
@@ -188,7 +205,6 @@ export default function DREPage() {
             <button key={id} onClick={() => setModo(id as any)} style={{ background: modo === id ? '#ff660033' : 'transparent', border: `1px solid ${modo === id ? '#ff6600' : '#2a2a3a'}`, color: modo === id ? '#ff6600' : '#555', borderRadius: 6, padding: '5px 12px', cursor: 'pointer', fontSize: 12, fontWeight: modo === id ? 700 : 400 }}>{label}</button>
           ))}
         </div>
-        {/* FIX: salvarImposto do hook garante sync entre todas as páginas */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 11, color: '#888' }}>Imposto</span>
           <input type="number" value={impostoInput} onChange={e => setImpostoInput(e.target.value)}
@@ -321,4 +337,3 @@ export default function DREPage() {
     </div>
   )
 }
-
